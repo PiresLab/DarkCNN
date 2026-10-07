@@ -140,7 +140,11 @@ def select_final(cands: list[dict], units: list[dict], video: Path, vid: str, ws
     if talk:
         for c in clips:
             c["transcript"] = " ".join(units[i]["text"] for i in range(c["start_id"], c["end_id"] + 1))
-    log.info("1ª passada: %d candidatos válidos, %d descartados", len(clips), len(rejected))
+    log.info("1ª passada: %d candidatos válidos, %d descartados%s", len(clips), len(rejected),
+             f" ({analyze.summarize_rejections(rejected)})" if rejected else "")
+    if rejected and not clips:
+        log.warning("nenhum candidato coube na faixa de %.0f-%.0fs: tente uma faixa mais larga (--min/--max)",
+                    cfg.min_clip_s, cfg.max_clip_s)
     if cfg.judge and len(clips) > 1:
         clips, dropped, st = judgelib.run_judge(video, vid, ws, clips, cfg, judge_factory, theme, force)
         rejected += dropped

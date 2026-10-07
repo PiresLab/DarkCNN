@@ -135,3 +135,13 @@ def test_verify_hooks_penalizes_invented_quotes_only():
              {"start_id": 2, "score": 1, "hook_quote": ""}]
     assert analyze.verify_hooks(cands, S2) == 2
     assert [(c["hook_ok"], c["score"]) for c in cands] == [(True, 8), (False, 6), (False, 1)]  # nota nunca < 1
+
+
+def test_rejection_summary_names_the_reasons():
+    rej = [{"reason_rejected": "curto demais (38s < 40s)"}, {"reason_rejected": "longo demais (51s > 45s)"},
+           {"reason_rejected": "curto demais (30s < 40s)"}, {"reason_rejected": "sobreposto ao corte de 00:10"},
+           {"reason_rejected": "id fora do intervalo 0..9".replace("id fora", "fora")}, {"reason_rejected": "algo novo"}]
+    s = analyze.summarize_rejections(rej)
+    assert s.startswith("2 curtos demais") and "1 longos demais" in s and "1 sobrepostos" in s
+    assert "1 com ID inválido" in s and "1 outros" in s
+    assert analyze.summarize_rejections([]) == ""

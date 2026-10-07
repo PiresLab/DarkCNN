@@ -48,12 +48,12 @@ def make_reel(video: Path, clips: list[dict], dest: Path, cfg: Config, workdir: 
         # reaproveita o desenho de "#id" dos planos: um único evento com o rótulo durante o trecho todo
         ass = ids_ass([{"id": label, "start": 0.0, "end": c["end"] - c["start"]}], cfg.font).replace("#A", "A")
         (workdir / f"l{i}.ass").write_text(ass, encoding="utf-8")
-        seg = workdir / f"s{i}.mp4"
+        seg = workdir / f"s{i}.mp4"  # caminho completo (para medir e juntar)
         run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
              "-ss", f"{c['start']:.3f}", "-t", f"{c['end'] - c['start']:.3f}", "-i", Path(video).resolve(),
              "-vf", f"scale=-2:{cfg.proxy_height},fps={cfg.visual_fps},ass=l{i}.ass",
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "32", "-pix_fmt", "yuv420p",
-             "-c:a", "aac", "-b:a", "32k", "-ac", "1", "-ar", "16000", seg], cwd=workdir)
+             "-c:a", "aac", "-b:a", "32k", "-ac", "1", "-ar", "16000", seg.name], cwd=workdir)  # nome simples: o ffmpeg roda em workdir
         d = probe_duration(seg)
         spans.append((label, t, t + d))
         t += d

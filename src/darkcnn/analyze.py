@@ -113,6 +113,18 @@ def verify_hooks(cands: list[dict[str, Any]], sentences: list[Sentence], penalty
     return bad
 
 
+def summarize_rejections(rejected: list[dict[str, Any]]) -> str:
+    """"3 duração fora da faixa, 2 sobrepostos" a partir dos motivos (para o log não deixar o usuário no escuro)."""
+    kinds = {"curto demais": "curtos demais", "longo demais": "longos demais", "sobreposto": "sobrepostos",
+             "fora do intervalo": "com ID inválido", "acima da quantidade": "acima da quantidade pedida"}
+    counts: dict[str, int] = {}
+    for r in rejected:
+        reason = r.get("reason_rejected", "")
+        label = next((v for k, v in kinds.items() if reason.startswith(k)), "outros")
+        counts[label] = counts.get(label, 0) + 1
+    return ", ".join(f"{n} {label}" for label, n in sorted(counts.items(), key=lambda kv: -kv[1]))
+
+
 def _clip(text: str, n: int) -> str:
     text = " ".join(text.split())
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
