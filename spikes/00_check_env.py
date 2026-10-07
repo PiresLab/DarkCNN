@@ -46,18 +46,18 @@ def main() -> None:
         row("encoder libmp3lame", "libmp3lame" in enc, "usado no áudio enviado ao Gemini")
         row("encoder h264_amf (AMD)", "h264_amf" in enc, "opcional (encode por GPU)", required=False)
 
+    has = lambda mod: importlib.util.find_spec(mod) is not None
+    row("pacote faster-whisper", has("faster_whisper"), "pip install faster-whisper (caminho recomendado, CPU)")
     cli = args.whisper_cli or shutil.which("whisper-cli") or shutil.which("main")
-    row("whisper.cpp (whisper-cli)", bool(cli and os.path.exists(cli)), cli or "passe --whisper-cli ou defina WHISPER_CLI")
-    if cli and os.path.exists(cli):
-        h = run([cli, "--help"], check=False)
-        text = (h.stdout + h.stderr)
-        row("  flag --output-json-full", "-ojf" in text, "tokens com timestamps")
-        row("  flag --max-len / -sow", "--max-len" in text and "--split-on-word" in text)
-        row("  flag --dtw", "--dtw" in text, "timestamps por DTW (melhor precisão)", required=False)
+    row("whisper.cpp (opcional)", bool(cli and os.path.exists(cli)), cli or "só para o spike 02; pode ignorar", required=False)
 
     key = os.environ.get("GEMINI_API_KEY")
     row("GEMINI_API_KEY", bool(key), "definida" if key else "crie .env (veja .env.example)")
-    row("pacote google-genai", importlib.util.find_spec("google.genai") is not None if importlib.util.find_spec("google") else False, "pip install -r spikes/requirements.txt")
+    try:
+        genai_ok = importlib.util.find_spec("google.genai") is not None
+    except ModuleNotFoundError:  # pacote 'google' nem existe
+        genai_ok = False
+    row("pacote google-genai", genai_ok, "pip install -r spikes/requirements.txt")
     row("yt-dlp", bool(shutil.which("yt-dlp")), "só necessário na Fase 2", required=False)
 
     print("\nRESULTADO:", "tudo certo" if ok_all else "há itens obrigatórios faltando")
