@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from pathlib import Path
 
 from common import OUT, probe_video, run, save_json
@@ -119,7 +120,7 @@ def video_chain(mode: str) -> str:
 
 
 def render(work: Path, src: Path, wm: Path, ass: Path, fonts: Path | None, mode: str,
-           start: float, dur: float | None, out_name: str) -> Path:
+           start: float, dur: float | None, out_name: str, preset: str = "medium") -> Path:
     """Um comando só: seek -> crop/blur-fit -> legenda -> marca d'água -> encode.
 
     Roda com cwd=work e caminhos relativos no filtro 'ass' para evitar o inferno de escape
@@ -133,15 +134,16 @@ def render(work: Path, src: Path, wm: Path, ass: Path, fonts: Path | None, mode:
         "[v1][wm]overlay=W-w-48:200[v]"
     )
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    # -ss e -t são opções de ENTRADA: precisam vir ANTES do -i que valem (senão limitam o -i seguinte)
     if start:
         cmd += ["-ss", str(start)]
-    cmd += ["-i", str(src)]
     if dur:
         cmd += ["-t", str(dur)]
+    cmd += ["-i", str(src)]
     cmd += [
         "-i", wm.name,
         "-filter_complex", fc, "-map", "[v]", "-map", "0:a?",
-        "-c:v", "libx264", "-crf", "20", "-preset", "medium", "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-crf", "20", "-preset", preset, "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out_name,
     ]
     run(cmd, cwd=work)
@@ -156,6 +158,7 @@ def main() -> None:
     ap.add_argument("--font", default="Arial" if os.name == "nt" else "DejaVu Sans")
     ap.add_argument("--fonts-dir", default=None, help="pasta com .ttf (opcional)")
     ap.add_argument("--watermark", default=None, help="PNG com alpha (padrão: gerado)")
+    ap.add_argument("--preset", default="medium", help="x264: ultrafast..veryslow (medium = o do pipeline real)")
     args = ap.parse_args()
 
     work = OUT / "spike01"
@@ -188,7 +191,10 @@ def main() -> None:
 
     summary = {}
     for mode in ("crop", "blur"):
-        out = render(work, src, Path(work / wm.name), ass, fonts, mode, start, dur, f"out_{mode}.mp4")
+        print(f"Renderizando '{mode}' ({dur or 'vídeo todo'} s, preset {args.preset})… pode levar alguns minutos em CPU fraca", flush=True)
+        t0 = time.perf_counter()
+        out = render(work, src, Path(work / wm.name), ass, fonts, mode, start, dur, f"out_{mode}.mp4", args.preset)
+        took = time.perf_counter() - t0
         info = probe_video(out)
         frame = work / f"frame_{mode}.png"
         run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", "3", "-i", out,
@@ -196,7 +202,8 @@ def main() -> None:
         ok = info["width"] == 1080 and info["height"] == 1920
         summary[mode] = {**info, "ok_1080x1920": ok, "frame": str(frame)}
         print(f"[{'OK' if ok else 'ERRO'}] {mode}: {info['width']}x{info['height']} "
-              f"{info['codec_name']} {info['pix_fmt']} {info['duration']:.2f}s -> {out}")
+              f"{info['codec_name']} {info['pix_fmt']} {info['duration']:.2f}s em {took:.0f}s de render -> {out}")
+        summary[mode]["render_s"] = round(took, 1)
 
     save_json("spike01_summary.json", summary)
     print("\nAbra os frames e confira: legenda legível, palavra destacada, marca d'água fora da UI.")
