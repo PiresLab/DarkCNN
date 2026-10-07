@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "darkcnn"
+version = "0.1.0"
+description = "Pipeline de cortes verticais (9:16) a partir de vídeos longos, com revisão manual"
+requires-python = ">=3.10"
+dependencies = [
+    "google-genai",
+    "pydantic>=2",
+    "pyyaml",
+    "faster-whisper",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+darkcnn = "darkcnn.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+darkcnn = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
