@@ -37,7 +37,7 @@ def license_warnings(lic: str | None) -> list[str]:
 
 
 def write_review(out_dir: Path, video: Path, cfg: Config, clips: list[dict], rejected: list[dict],
-                 info: dict, meta: dict | None = None) -> Path:
+                 info: dict, meta: dict | None = None, compilation: dict | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "selection.json").write_text(json.dumps(clips, ensure_ascii=False, indent=2), encoding="utf-8")
     (out_dir / "rejected.json").write_text(json.dumps(rejected, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -50,8 +50,16 @@ def write_review(out_dir: Path, video: Path, cfg: Config, clips: list[dict], rej
     warn += license_warnings(cfg.license)
     if cfg.profile == "visual":
         warn.append("nomes de lutadores/eventos/pessoas no título vêm do Gemini e podem estar errados: confira")
+    if compilation:
+        if compilation["duration"] > 180:
+            warn.append(f"o compilado tem {compilation['duration']:.0f}s e passa de 3 min (limite do YouTube Shorts)")
+        if len(clips) < compilation["requested"]:
+            warn.append(f"só {len(clips)} momento(s) combinaram com o tema (pedido: {compilation['requested']})")
+        warn.append("o compilado junta vários trechos de UM vídeo de terceiros: a licença acima vale para todos eles")
     L = [
         f"# Revisão — {video.name}", "",
+        *([f"- **Compilado:** `{compilation['file']}` — tema \"{compilation['theme']}\" — "
+           f"{fmt_ts(compilation['duration'])} (contagem regressiva: o #1 aparece por último)"] if compilation else []),
         *([f"- **Vídeo original:** {meta.get('title')} — canal {meta.get('channel')}"] if meta else []),
         f"- **Fonte:** {cfg.source or '⚠ não informada'}",
         f"- **Licença/permissão:** {cfg.license or '⚠ não informada'}",
@@ -61,19 +69,31 @@ def write_review(out_dir: Path, video: Path, cfg: Config, clips: list[dict], rej
     ]
     if warn:
         L += ["", "> ⚠ **Antes de postar:** " + "; ".join(warn) + "."]
-    L += ["", "| # | Nota | Duração | Na fonte | Título |", "|---|---|---|---|---|"]
+    if compilation:
+        clips = sorted(clips, key=lambda c: c.get("order", c["rank"]))  # ordem em que aparecem no vídeo
+    judged = any("judge_score" in c for c in clips)
+    at_col = "No compilado | " if compilation else ""
+    L += ["", "| # | Nota 1ª passada | " + ("Nota do juiz | " if judged else "") + f"Duração | {at_col}Na fonte | Título |",
+          "|---|---|" + ("---|" if judged else "") + "---|" + ("---|" if compilation else "") + "---|---|"]
     for c in clips:
-        L.append(f"| {c['rank']} | {c['score']} | {c['duration']:.0f}s | {fmt_ts(c['start'])}–{fmt_ts(c['end'])} "
-                 f"| {c['title']} |")
+        L.append(f"| {c['rank']} | {c['score']} | " + (f"{c.get('judge_score', '—')} | " if judged else "")
+                 + f"{c['duration']:.0f}s | " + (f"{fmt_ts(c.get('at', 0))} | " if compilation else "")
+                 + f"{fmt_ts(c['start'])}–{fmt_ts(c['end'])} | {c['title']} |")
     for c in clips:
         link = source_link(cfg.source, c["start"])
         L += [
             "", f"## {c['rank']}. {c['title']}", "",
             f"- **Arquivo:** `{c['file']}`",
+            *([f"- **Contexto (topo da tela):** {c['context']}"] if c.get("context") else []),
             f"- **Frase-gancho (tela):** {c['hook_text']}",
             f"- **Nota:** {c['score']}/10 (gancho {c['hook']}, autocontido {c['standalone']}, "
             f"emoção {c['emotion']}, payoff {c['payoff']})",
             f"- **Motivo:** {c['reason']}",
+            *([f"- **Encaixe no tema:** {c['fit']}/10"] if c.get("fit") else []),
+            *([f"- **Juiz ({c['judge_score']}/100):** + {c['judge_strength']} / − {c['judge_weakness']}"]
+              if "judge_score" in c else []),
+            *(["- ⚠ O gancho citado pelo modelo não confere com a transcrição (nota reduzida): confira o início."]
+              if c.get("hook_ok") is False else []),
             f"- **Na fonte:** {fmt_ts(c['start'])}–{fmt_ts(c['end'])}" + (f" — [abrir no ponto]({link})" if link else ""),
         ]
         if c.get("adjusted"):

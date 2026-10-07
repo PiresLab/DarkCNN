@@ -48,10 +48,11 @@ def render_key(src_id: str, clip: dict, words: list[dict], cfg: Config) -> str:
         wm_sig = [str(wm), wm.stat().st_size, int(wm.stat().st_mtime)]
     inside = [w for w in words if clip["start"] - 0.05 <= w["start"] and w["end"] <= clip["end"] + 0.05]
     return cache.key_of(
-        v=1, src=src_id, start=clip["start"], end=clip["end"], title=clip["title"], hook=clip["hook_text"],
+        v=2, src=src_id, start=clip["start"], end=clip["end"], title=clip["title"], hook=clip["hook_text"],
         text_mode=cfg.text_mode, layout=cfg.layout, font=cfg.font, preset=cfg.preset, crf=cfg.crf,
         wm=wm_sig, wm_cfg=cfg.watermark.model_dump(mode="json", exclude={"path"}),
-        words=inside if cfg.text_mode == "captions" else None,
+        words=inside if cfg.text_mode in ("captions", "both") else None,
+        context=clip.get("context"), rank_pos=clip.get("rank_pos"), theme=clip.get("theme"),
     )
 
 

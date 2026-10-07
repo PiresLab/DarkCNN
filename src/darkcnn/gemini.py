@@ -41,15 +41,28 @@ class Backend(Protocol):
 
 
 class GenaiBackend:
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, thinking: str = "off"):
         from google import genai
 
         self._client = genai.Client(api_key=api_key)
         self.model = model
+        self.thinking = thinking  # off | low | medium | high
+
+    def _config(self, schema: type[BaseModel], temperature: float):
+        from google.genai import types
+
+        kw: dict[str, Any] = dict(
+            response_mime_type="application/json", response_schema=schema, temperature=temperature,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        )
+        if self.thinking != "off":
+            level = getattr(types.ThinkingLevel, self.thinking.upper())
+            kw["thinking_config"] = types.ThinkingConfig(thinking_level=level)
+        return types.GenerateContentConfig(**kw)
 
     def generate(self, prompt: str, schema: type[BaseModel], temperature: float,
                  media: Path | None = None) -> tuple[BaseModel, dict]:
-        from google.genai import errors, types
+        from google.genai import errors
 
         uploaded = None
         try:
@@ -62,14 +75,18 @@ class GenaiBackend:
                 if uploaded.state is not None and uploaded.state.name != "ACTIVE":
                     raise GeminiError(f"upload falhou: estado {uploaded.state.name} {uploaded.error}")
                 contents = [uploaded, prompt]
-            r = self._client.models.generate_content(
-                model=self.model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json", response_schema=schema, temperature=temperature,
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                ),
-            )
+            try:
+                r = self._client.models.generate_content(model=self.model, contents=contents,
+                                                         config=self._config(schema, temperature))
+            except errors.APIError as e:
+                if self.thinking != "off" and e.code == 400 and "think" in (e.message or "").lower():
+                    log.warning("o modelo %s não aceitou o nível de raciocínio '%s'; seguindo sem raciocínio",
+                                self.model, self.thinking)
+                    self.thinking = "off"
+                    r = self._client.models.generate_content(model=self.model, contents=contents,
+                                                             config=self._config(schema, temperature))
+                else:
+                    raise
         except errors.APIError as e:
             msg = f"{e.code} {e.status}: {(e.message or '')[:400]}"
             if e.code in TRANSIENT_CODES:
@@ -91,7 +108,7 @@ class GenaiBackend:
         u = r.usage_metadata
         usage = {
             "prompt_tokens": (u.prompt_token_count or 0) if u else 0,
-            "output_tokens": (u.candidates_token_count or 0) if u else 0,
+            "output_tokens": ((u.candidates_token_count or 0) + (u.thoughts_token_count or 0)) if u else 0,
         }
         return parsed, usage
 

@@ -1,6 +1,9 @@
 # Copie para config.yaml (ignorado pelo git). Tudo é opcional: os valores abaixo são os padrões.
 
 gemini_model: gemini-3.1-flash-lite   # veja os IDs com: python spikes/03_gemini_probe.py --list-models
+thinking_level: medium                # off | low | medium | high: raciocínio do Gemini na seleção e no juiz
+judge: true                           # 2ª passada: o Gemini assiste aos candidatos e os compara
+# judge_model: gemini-3.5-flash       # modelo do juiz (padrão: o mesmo de gemini_model)
 daily_request_budget: 40              # trava de segurança; ajuste quando souber a cota do seu projeto
 
 # --- perfil ---
@@ -17,7 +20,7 @@ clips_per_video: 5
 whisper_model: small                  # small ≈ 16 min por hora de vídeo num i7-10510U; medium é mais preciso e mais lento
 
 # --- aparência ---
-text_mode: captions                   # captions = legenda por palavra | titled = título no topo + gancho embaixo | none
+# text_mode: both                     # both = contexto no topo + legenda (padrão do talk) | captions | titled (padrão do visual) | none
 layout: blur                          # blur = vídeo inteiro sobre fundo desfocado | crop = corte central
 # font: Arial
 # fonts_dir: assets/fonts             # pasta com .ttf/.otf (opcional)
@@ -31,3 +34,6 @@ watermark:
 # --- procedência (aparece no review.md; preencha sempre) ---
 # source: https://www.youtube.com/watch?v=XXXX
 # license: "CC-BY 4.0"                # ou "autorizado por <canal> em <data>"
+
+# --- compilado (python -m darkcnn compile LINK --theme "top 5 finalizações") ---
+# theme_min_fit: 5                    # momentos com encaixe no tema abaixo disso são descartados

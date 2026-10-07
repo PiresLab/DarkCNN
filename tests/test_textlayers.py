@@ -43,3 +43,29 @@ def test_group_words_respects_width_budget():
     ws = [{"w": w} for w in ["responsabilidade", "legenda", "com", "palavra", "destacada"]]
     for g in T.group_words(ws):
         assert len(g) <= 3 and (len(g) == 1 or sum(len(x["w"]) for x in g) + len(g) - 1 <= 16)
+
+
+def test_both_has_context_on_top_and_word_captions_below():
+    clip = {**CLIP, "context": "Pesquisadora explica por que cerveja zero dá positivo"}
+    ass = T.build_ass(clip, WORDS, Config(text_mode="both"))
+    d = [l for l in ass.splitlines() if l.startswith("Dialogue")]
+    assert any(",Context," in l and "Pesquisadora explica" in l for l in d)  # contexto no topo, a clipe todo
+    assert any(",Default," in l and "MUNDO." in l for l in d)  # e a legenda por palavra
+    assert not any(",Hook," in l for l in d)  # embaixo é só legenda (sem gancho)
+    assert d[0].startswith("Dialogue: 0,0:00:00.00,0:00:10.00")
+
+
+def test_both_falls_back_to_title_without_context():
+    ass = T.build_ass({**CLIP, "title": "Título só"}, WORDS, Config(text_mode="both"))
+    assert "Título só" in ass
+
+
+def test_ranked_has_theme_title_big_rank_badge_and_hook():
+    clip = {**CLIP, "rank_pos": 3, "theme": "top 5 finalizações", "title": "Mata-leão no 2º round"}
+    ass = T.build_ass(clip, [], Config(text_mode="ranked"))
+    d = [l for l in ass.splitlines() if l.startswith("Dialogue")]
+    styles = [l.split(",")[3] for l in d]
+    assert styles == ["Theme", "Title", "Rank", "Badge", "Hook"]
+    assert "TOP 5 FINALIZAÇÕES" in d[0] and "Mata-leão" in d[1]
+    assert d[2].startswith("Dialogue: 2,0:00:00.00,0:00:01.40") and "#3" in d[2]  # número grande só na entrada
+    assert d[3].startswith("Dialogue: 1,0:00:00.00,0:00:10.00") and d[3].endswith("#3")  # selo fixo

@@ -24,10 +24,23 @@ class Config(BaseModel):
 
     # --- Gemini ---
     gemini_model: str = "gemini-3.1-flash-lite"  # NUNCA fixar no código: IDs mudam/são descontinuados
-    prompt_version: str = "select_v1"
+    prompt_version: str = "select_v2"  # perfil de fala
+    visual_prompt_version: str = "select_visual_v2"
+    theme_prompt_version: str = "select_theme_v1"
     daily_request_budget: int = Field(40, ge=1)  # conservador até confirmar a cota do projeto
     gemini_retries: int = Field(3, ge=0)
     gemini_backoff_s: float = 5.0
+    # raciocínio do Gemini ("thinking"): off = não envia; se o modelo não suportar, desliga sozinho com aviso
+    thinking_level: Literal["off", "low", "medium", "high"] = "medium"
+
+    # --- juiz: 2ª passada que assiste aos candidatos e os compara entre si ---
+    judge: bool = True
+    judge_model: str | None = None  # None = o mesmo gemini_model
+    judge_factor: int = Field(3, ge=1)  # candidatos pedidos = clips_per_video x judge_factor
+    judge_max_candidates: int = Field(12, ge=2)  # teto de candidatos no vídeo que o juiz assiste
+    judge_prompt_version: str = "judge_v1"
+    theme: str | None = None  # modo compilado ("top 5 finalizações")
+    theme_min_fit: int = Field(5, ge=1, le=10)  # abaixo disso o momento não combina com o tema e é descartado
 
     # --- perfil: talk = vídeo com fala (transcrição); visual = sem fala (planos + vídeo para o Gemini) ---
     profile: Literal["talk", "visual"] = "talk"
@@ -56,7 +69,9 @@ class Config(BaseModel):
     min_word_s: float = 0.08  # Whisper às vezes devolve palavras com duração 0
 
     # --- vídeo/texto na tela ---
-    text_mode: Literal["captions", "titled", "none"] = "captions"
+    # captions = legenda por palavra | titled = título no topo + gancho embaixo | both = contexto no topo + legenda
+    # | ranked = compilado "Top N" | none. Padrão (se não escolhido): both no perfil talk, titled no visual.
+    text_mode: Literal["captions", "titled", "both", "ranked", "none"] = "captions"
     layout: Literal["crop", "blur"] = "blur"
     font: str = "Arial" if os.name == "nt" else "DejaVu Sans"
     fonts_dir: Path | None = None

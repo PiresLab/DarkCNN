@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from . import analyze, cache, media, render, review, shots as shotlib, visual
+from . import analyze, cache, judge as judgelib, media, render, review, shots as shotlib, visual
 from .config import Config
 from .gemini import GenaiBackend, GeminiClient, GeminiError
 from .ingest import apply_meta, resolve_input
@@ -19,12 +19,12 @@ log = logging.getLogger(__name__)
 WORDS_VERSION = 1
 
 
-def make_client(cfg: Config) -> GeminiClient:
+def make_client(cfg: Config, model: str | None = None) -> GeminiClient:
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise GeminiError("GEMINI_API_KEY não definida (crie o .env a partir do .env.example)")
     return GeminiClient(
-        GenaiBackend(key, cfg.gemini_model),
+        GenaiBackend(key, model or cfg.gemini_model, cfg.thinking_level),
         usage_path=cfg.workspace_dir / "usage.json",
         daily_budget=cfg.daily_request_budget,
         retries=cfg.gemini_retries,
@@ -74,15 +74,16 @@ def step_words(video: Path, vid: str, ws: Path, cfg: Config, transcriber: Transc
 def step_select(ws: Path, sentences: list[dict], cfg: Config, client_factory: Callable[[], GeminiClient],
                 force: bool) -> list[dict]:
     path = ws / "analysis.json"
-    key = cache.key_of(v=1, transcript=analyze.transcript_hash(sentences), model=cfg.gemini_model,
-                       prompt=cfg.prompt_version, n=analyze.n_candidates(cfg), min=cfg.min_clip_s, max=cfg.max_clip_s)
+    key = cache.key_of(v=2, transcript=analyze.transcript_hash(sentences), model=cfg.gemini_model,
+                       prompt=cfg.prompt_version, n=analyze.n_candidates(cfg), min=cfg.min_clip_s,
+                       max=cfg.max_clip_s, thinking=cfg.thinking_level)
     if not force:
         hit = cache.load(path, key)
         if hit is not None:
             log.info("análise em cache (%d candidatos), sem chamar o Gemini", len(hit))
             return hit
     log.info("pedindo ao Gemini (%s) %d candidatos…", cfg.gemini_model, analyze.n_candidates(cfg))
-    sel = client_factory().generate_json(analyze.build_prompt(sentences, cfg), analyze.Selection)
+    sel = client_factory().generate_json(analyze.build_prompt(sentences, cfg), analyze.TalkSelection)
     cands = [c.model_dump() for c in sel.candidates]
     cache.save(path, key, cands)
     return cands
@@ -115,9 +116,38 @@ SHOTS_VERSION = 1
 def effective_cfg(cfg: Config, meta: dict) -> Config:
     """Procedência do link + padrões do perfil: no perfil visual o texto padrão é título+gancho (não há fala)."""
     cfg = apply_meta(cfg, meta)
-    if cfg.profile == "visual" and "text_mode" not in cfg.model_fields_set:
-        cfg = cfg.model_copy(update={"text_mode": "titled"})
+    if "text_mode" not in cfg.model_fields_set:  # o usuário não escolheu: padrão por perfil
+        cfg = cfg.model_copy(update={"text_mode": "titled" if cfg.profile == "visual" else "both"})
     return cfg
+
+
+def finalize(kept: list[dict], dropped: list[dict], cfg: Config) -> tuple[list[dict], list[dict]]:
+    """Fica com os N melhores (a ordem de `kept` já é a final), numera 1..N e manda o resto para os descartados."""
+    keep, extra = kept[:cfg.clips_per_video], kept[cfg.clips_per_video:]
+    for rank, c in enumerate(keep, 1):
+        c["rank"] = rank
+    for c in extra:
+        c.pop("rank", None)
+    return keep, dropped + [{**c, "reason_rejected": "acima da quantidade pedida"} for c in extra]
+
+
+def select_final(cands: list[dict], units: list[dict], video: Path, vid: str, ws: Path, cfg: Config,
+                 duration: float, judge_factory: Callable[[], GeminiClient], theme: str | None = None,
+                 force: bool = False, talk: bool = False) -> tuple[list[dict], list[dict]]:
+    """candidatos da 1ª passada -> tempos exatos -> (juiz) -> N finais + descartados."""
+    pool_cfg = cfg.model_copy(update={"clips_per_video": analyze.pool_size(cfg)})
+    clips, rejected = analyze.resolve(cands, units, pool_cfg, duration)
+    if talk:
+        for c in clips:
+            c["transcript"] = " ".join(units[i]["text"] for i in range(c["start_id"], c["end_id"] + 1))
+    log.info("1ª passada: %d candidatos válidos, %d descartados", len(clips), len(rejected))
+    if cfg.judge and len(clips) > 1:
+        clips, dropped, st = judgelib.run_judge(video, vid, ws, clips, cfg, judge_factory, theme, force)
+        rejected += dropped
+        if st.get("judged"):
+            log.info("juiz: %d mantidos, %d descartados%s", len(clips), len(dropped),
+                     "; ordem MUDOU em relação à 1ª passada" if st.get("reordered") else "; mesma ordem da 1ª passada")
+    return finalize(clips, rejected, cfg)
 
 
 def step_shots(video: Path, vid: str, ws: Path, cfg: Config, force: bool = False) -> list[dict]:
@@ -161,7 +191,8 @@ def shots_report(input_arg: str | Path, cfg: Config, ydl_cls: Any = None) -> str
 
 
 def run_pipeline(input_arg: str | Path, cfg: Config, *, transcriber: Transcriber = transcribe_words,
-                 client_factory: Callable[[], GeminiClient] | None = None, force: bool = False,
+                 client_factory: Callable[[], GeminiClient] | None = None,
+                 judge_factory: Callable[[], GeminiClient] | None = None, force: bool = False,
                  ydl_cls: Any = None) -> Path:
     _setup_logging()
     ing = resolve_input(str(input_arg), cfg, ydl_cls)  # arquivo local ou download do link
@@ -174,12 +205,14 @@ def run_pipeline(input_arg: str | Path, cfg: Config, *, transcriber: Transcriber
     log.info("config: perfil=%s layout=%s texto=%s modelo=%s cortes=%d (%.0f-%.0fs)", cfg.profile, cfg.layout,
              cfg.text_mode, cfg.gemini_model, cfg.clips_per_video, cfg.min_clip_s, cfg.max_clip_s)
     factory = client_factory or (lambda: make_client(cfg))
+    jfactory = judge_factory or (client_factory or (lambda: make_client(cfg, cfg.judge_model)))
 
     if cfg.profile == "visual":  # sem fala: planos + vídeo reduzido para o Gemini
         words: list[dict] = []
         units = step_shots(video, vid, ws, cfg, force)
         cands, vstats = visual.select_visual(video, vid, ws, units, cfg, factory, force)
         log.info("Gemini: %d chamada(s) novas, %d ID(s) corrigido(s)", vstats["api_calls"], vstats["reconciled"])
+        clips, rejected = select_final(cands, units, video, vid, ws, cfg, info["duration"], jfactory, force=force)
     else:
         if info["duration"] / 60 > cfg.max_single_window_min:
             log.warning("vídeo > %.0f min: a análise em janelas só chega na Fase 3; a qualidade pode cair",
@@ -188,9 +221,13 @@ def run_pipeline(input_arg: str | Path, cfg: Config, *, transcriber: Transcriber
         units = split_sentences(words)
         log.info("%d frases", len(units))
         cands = step_select(ws, units, cfg, factory, force)
+        bad = analyze.verify_hooks(cands, units)
+        if bad:
+            log.warning("%d candidato(s) citaram um gancho que não está na transcrição (nota reduzida)", bad)
+        clips, rejected = select_final(cands, units, video, vid, ws, cfg, info["duration"], jfactory,
+                                       force=force, talk=True)
 
-    clips, rejected = analyze.resolve(cands, units, cfg, info["duration"])
-    log.info("%d cortes aceitos, %d descartados", len(clips), len(rejected))
+    log.info("%d cortes finais, %d descartados", len(clips), len(rejected))
     if not clips:
         log.warning("nenhum corte válido; veja rejected.json (ajuste min/max ou rode com --force)")
     out.mkdir(parents=True, exist_ok=True)
@@ -201,12 +238,23 @@ def run_pipeline(input_arg: str | Path, cfg: Config, *, transcriber: Transcriber
 def render_from_selection(input_arg: str | Path, cfg: Config, ydl_cls: Any = None) -> Path:
     """Re-renderiza a partir do selection.json editado (início/fim/título/gancho), sem Whisper nem Gemini."""
     _setup_logging()
+    if cfg.theme:
+        cfg = compile_defaults(cfg)
     ing = resolve_input(str(input_arg), cfg, ydl_cls)
     video, meta = ing.path, ing.meta
     cfg = effective_cfg(cfg, meta)
     vid, ws, out = _paths(video, cfg)
     _setup_logging(ws)
     sel = out / "selection.json"
+    if cfg.theme:  # compilado: remonta a partir do selection.json editado (ordem = campo `rank`)
+        if not sel.exists():
+            raise FileNotFoundError("rode `compile` antes: falta o selection.json")
+        clips = json.loads(sel.read_text(encoding="utf-8"))
+        for c in clips:
+            c["duration"] = round(c["end"] - c["start"], 3)
+        rejected = json.loads((out / "rejected.json").read_text(encoding="utf-8")) if (out / "rejected.json").exists() else []
+        comp = assemble(video, vid, ws, out, clips, cfg)
+        return review.write_review(out, video, cfg, clips, rejected, media.video_info(video), meta, comp)
     words = [] if cfg.profile == "visual" else cache.load(ws / "words.json", cache.key_of(v=WORDS_VERSION, vid=vid, model=cfg.whisper_model,
                        beam=cfg.whisper_beam, lang=cfg.language, compute=cfg.whisper_compute_type,
                        min_word=cfg.min_word_s))
@@ -218,3 +266,94 @@ def render_from_selection(input_arg: str | Path, cfg: Config, ydl_cls: Any = Non
     rejected = json.loads((out / "rejected.json").read_text(encoding="utf-8")) if (out / "rejected.json").exists() else []
     step_render(video, vid, ws, out, clips, words, cfg)
     return review.write_review(out, video, cfg, clips, rejected, media.video_info(video), meta)
+
+
+# ------------------------------------------------------------------ compilado "Top N"
+COMPILE_MIN_S, COMPILE_MAX_S = 8.0, 25.0  # trechos curtos: o compilado soma vários
+
+
+def compile_defaults(cfg: Config) -> Config:
+    """Padrões do compilado quando o usuário não definiu: perfil visual, texto `ranked`, trechos de 8-25 s."""
+    upd: dict = {"profile": "visual"}
+    if "text_mode" not in cfg.model_fields_set:
+        upd["text_mode"] = "ranked"
+    if "min_clip_s" not in cfg.model_fields_set:
+        upd["min_clip_s"] = COMPILE_MIN_S
+    if "max_clip_s" not in cfg.model_fields_set:
+        upd["max_clip_s"] = max(COMPILE_MAX_S, cfg.min_clip_s) if "min_clip_s" in cfg.model_fields_set else COMPILE_MAX_S
+    return cfg.model_copy(update=upd)
+
+
+def prepare_theme(cands: list[dict], min_fit: int) -> tuple[list[dict], list[dict]]:
+    """Descarta o que não combina com o tema e pesa o encaixe (2/3) na nota da 1ª passada."""
+    ok, rej = [], []
+    for c in cands:
+        if c["fit"] < min_fit:
+            rej.append({**c, "reason_rejected": f"não combina bem com o tema (encaixe {c['fit']}/10)"})
+        else:
+            ok.append({**c, "score": max(1, min(10, round((c["score"] + 2 * c["fit"]) / 3)))})
+    return ok, rej
+
+
+def assemble(video: Path, vid: str, ws: Path, out: Path, clips: list[dict], cfg: Config) -> dict:
+    """Renderiza cada trecho (mesmo comando único de sempre, texto `ranked`) e junta em contagem regressiva:
+    do pior (#K) ao melhor (#1), que fica por último. Devolve info do compilado."""
+    ordered = sorted(clips, key=lambda c: -c["rank"])
+    parts: list[Path] = []
+    t = 0.0
+    for i, c in enumerate(ordered, 1):
+        c.update(rank_pos=c["rank"], theme=cfg.theme, order=i)
+        seg = ws / "segments" / f"{i:02d}.mp4"
+        log.info("trecho %d/%d: #%d %s (%.0fs)", i, len(ordered), c["rank"], c["title"], c["duration"])
+        if not render.render_clip(video, c, [], cfg, seg, ws / "render" / f"{i:02d}", render.render_key(vid, c, [], cfg)):
+            log.info("  já renderizado (mesma configuração), pulando")
+        c["at"] = round(t, 2)
+        t += media.probe_duration(seg)
+        parts.append(seg)
+    for old in (ws / "segments").glob("*.mp4"):  # segmentos de uma versão anterior com mais trechos
+        if int(old.stem) > len(ordered):
+            old.unlink()
+    dest = out / f"compilado_{media.slugify(cfg.theme or 'top', 50)}.mp4"
+    out.mkdir(parents=True, exist_ok=True)
+    media.concat_copy(parts, dest, reencode_audio=True)
+    duration = media.probe_duration(dest)
+    for c in clips:
+        c["file"] = dest.name
+    log.info("compilado pronto: %s (%.0fs)", dest.name, duration)
+    return {"file": dest.name, "duration": duration, "theme": cfg.theme, "requested": cfg.clips_per_video}
+
+
+def run_compile(input_arg: str | Path, cfg: Config, *, client_factory: Callable[[], GeminiClient] | None = None,
+                judge_factory: Callable[[], GeminiClient] | None = None, force: bool = False,
+                ydl_cls: Any = None) -> Path:
+    """Um vídeo-fonte -> um compilado "Top N" sobre o tema, em contagem regressiva."""
+    if not cfg.theme:
+        raise ValueError('informe o tema: --theme "top 5 finalizações"')
+    cfg = compile_defaults(cfg)
+    _setup_logging()
+    ing = resolve_input(str(input_arg), cfg, ydl_cls)
+    video, meta = ing.path, ing.meta
+    cfg = effective_cfg(cfg, meta)
+    vid, ws, out = _paths(video, cfg)
+    _setup_logging(ws)
+    info = media.video_info(video)
+    log.info("compilado \"%s\": %s (%.1f min) -> id %s", cfg.theme, video.name, info["duration"] / 60, vid)
+    log.info("config: top %d, trechos de %.0f-%.0fs, layout=%s modelo=%s juiz=%s", cfg.clips_per_video,
+             cfg.min_clip_s, cfg.max_clip_s, cfg.layout, cfg.gemini_model, "sim" if cfg.judge else "não")
+    factory = client_factory or (lambda: make_client(cfg))
+    jfactory = judge_factory or (client_factory or (lambda: make_client(cfg, cfg.judge_model)))
+
+    units = step_shots(video, vid, ws, cfg, force)
+    cands, vstats = visual.select_visual(video, vid, ws, units, cfg, factory, force, theme=cfg.theme)
+    log.info("Gemini: %d chamada(s) novas, %d ID(s) corrigido(s)", vstats["api_calls"], vstats["reconciled"])
+    cands, pre_rejected = prepare_theme(cands, cfg.theme_min_fit)
+    clips, rejected = select_final(cands, units, video, vid, ws, cfg, info["duration"], jfactory,
+                                   theme=cfg.theme, force=force)
+    rejected = pre_rejected + rejected
+    if not clips:
+        raise RuntimeError(f'nenhum momento combina com "{cfg.theme}" neste vídeo; veja rejected.json')
+    if len(clips) < cfg.clips_per_video:
+        log.warning('só achei %d momento(s) que combinam com "%s" (pedido: %d)', len(clips), cfg.theme,
+                    cfg.clips_per_video)
+    comp = assemble(video, vid, ws, out, clips, cfg)
+    return review.write_review(out, video, cfg, clips, rejected, info, meta, comp)

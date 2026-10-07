@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from darkcnn.analyze import Candidate, Selection
+from darkcnn.analyze import Candidate, Selection, TalkCandidate
 from darkcnn.config import Config
 
 
@@ -36,11 +36,13 @@ def make_words(n_sentences: int = 12, sent_s: float = 5.0, words_per: int = 5,
     return words
 
 
-def cand(start_id, end_id, score=7, title="Título de teste", hook_text="Gancho", **kw) -> Candidate:
+def cand(start_id, end_id, score=7, title="Título de teste", hook_text="Gancho", **kw) -> TalkCandidate:
+    """Candidato de fala. O hook_quote padrão bate com as frases de make_words (frase i = palavraIx0 …)."""
     base = dict(start_id=start_id, end_id=end_id, title=title, hook_text=hook_text, reason="porque sim",
-                hook=7, standalone=7, emotion=7, payoff=7, score=score)
+                hook=7, standalone=7, emotion=7, payoff=7, score=score, context="Contexto de teste do corte",
+                hook_quote=f"palavra{start_id}x0 palavra{start_id}x1 palavra{start_id}x2")
     base.update(kw)
-    return Candidate(**base)
+    return TalkCandidate(**base)
 
 
 class FakeBackend:
@@ -66,7 +68,7 @@ class FakeBackend:
 
 @pytest.fixture
 def cfg(tmp_path) -> Config:
-    return Config(min_clip_s=8, max_clip_s=20, clips_per_video=3, preset="ultrafast",
+    return Config(min_clip_s=8, max_clip_s=20, clips_per_video=3, preset="ultrafast", judge=False,
                   workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out")
 
 
@@ -134,3 +136,28 @@ def make_cut_video(path: Path, seg_s: int = 10, audio: bool = True) -> Path:
     cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(path)]
     subprocess.run(cmd, check=True)
     return path
+
+
+class SmartBackend(FakeBackend):
+    """Backend que responde a cada tipo de pedido: seleção (candidatos fixos) e juiz (plano por rótulo).
+    judge_plan: {"A1": (nota, keep, fraqueza), ...}; rótulo ausente = esquecido pelo juiz."""
+
+    def __init__(self, candidates, judge_plan=None):
+        super().__init__(candidates)
+        self.judge_plan = judge_plan or {}
+        self.judge_calls = 0
+
+    def generate(self, prompt, schema, temperature, media=None):
+        import re
+        from darkcnn.judge import JudgeItem, JudgeVerdict
+        if schema is JudgeVerdict:
+            self.calls += 1
+            self.judge_calls += 1
+            self.prompts.append(prompt)
+            self.media.append(media)
+            assert media is not None and media.exists()
+            n = int(re.search(r"SEQUÊNCIA de (\d+)", prompt).group(1))
+            items = [JudgeItem(label=l, final_score=s, keep=k, strength="ótimo gancho", weakness=w or "ok")
+                     for l, (s, k, w) in self.judge_plan.items() if int(l[1:]) <= n]
+            return JudgeVerdict(ranking=items), {"prompt_tokens": 10, "output_tokens": 5}
+        return super().generate(prompt, schema, temperature, media)

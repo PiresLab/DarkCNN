@@ -172,7 +172,7 @@ def test_relative_workspace_and_output_dirs_work_with_link_input(tmp_path, monke
     from pathlib import Path
     from conftest import YT_INFO, make_fake_ydl
     monkeypatch.chdir(tmp_path)
-    cfg = Config(min_clip_s=8, max_clip_s=20, clips_per_video=1, preset="ultrafast", text_mode="captions",
+    cfg = Config(min_clip_s=8, max_clip_s=20, clips_per_video=1, preset="ultrafast", text_mode="captions", judge=False,
                  workspace_dir=Path("workspace"), output_dir=Path("output"))
     ydl = make_fake_ydl(YT_INFO, video_dur=60)
     backend = FakeBackend([cand(0, 2, score=9, title="Primeiro")])
@@ -180,3 +180,63 @@ def test_relative_workspace_and_output_dirs_work_with_link_input(tmp_path, monke
     review = pipeline.run_pipeline("https://youtu.be/IALW8WPhUQ4", cfg, transcriber=whisper,
                                    client_factory=factory, ydl_cls=ydl)
     assert len(list(review.parent.glob("*.mp4"))) == 1
+
+
+@needs_ffmpeg
+def test_talk_with_judge_both_mode_end_to_end(tmp_path, cfg):
+    from conftest import SmartBackend
+    cfg = cfg.model_copy(update={"judge": True, "clips_per_video": 2, "proxy_height": 144})  # text_mode NÃO definido
+    backend = SmartBackend(
+        [cand(0, 2, score=9, title="A primeira"), cand(3, 5, score=8, title="B segunda"),
+         cand(6, 8, score=7, title="C terceira"), cand(9, 11, score=6, title="D quarta")],
+        judge_plan={"A3": (90, True, ""), "A1": (80, True, ""), "A4": (40, False, "começa devagar"),
+                    "A2": (50, True, "")})
+    video, whisper, factory, _ = setup(tmp_path, cfg, backend)
+
+    review = pipeline.run_pipeline(video, cfg, transcriber=whisper, client_factory=factory)
+    out = review.parent
+    sel = json.loads((out / "selection.json").read_text(encoding="utf-8"))
+    # o juiz inverteu a ordem da 1ª passada: C (nota 90) vence A (80); D foi vetado; B ficou acima do limite
+    assert [(c["title"], c["rank"], c["score"], c["judge_score"]) for c in sel] == \
+        [("C terceira", 1, 7, 90), ("A primeira", 2, 9, 80)]
+    assert backend.calls == 2 and backend.judge_calls == 1 and backend.media[0] is None and backend.media[1] is not None
+    names = sorted(m.name for m in out.glob("*.mp4"))
+    assert names[0].startswith("01_c-terceira") and names[1].startswith("02_a-primeira")
+
+    rej = {r["title"]: r["reason_rejected"] for r in json.loads((out / "rejected.json").read_text(encoding="utf-8"))}
+    assert rej["D quarta"] == "juiz: começa devagar" and rej["B segunda"] == "acima da quantidade pedida"
+
+    text = review.read_text(encoding="utf-8")
+    assert "Nota do juiz" in text and "Juiz (90/100)" in text and "Contexto (topo da tela):** Contexto de teste do corte" in text
+    ass = next((cfg.workspace_dir).glob("*/render/01/subs.ass")).read_text(encoding="utf-8")
+    assert ",Context," in ass and "Contexto de teste do corte" in ass  # padrão do talk: contexto no topo + legenda
+
+    # 2ª execução: tudo em cache, inclusive o juiz
+    pipeline.run_pipeline(video, cfg, transcriber=whisper, client_factory=factory)
+    assert backend.calls == 2
+
+    # --no-judge: mantém a ordem da 1ª passada e não assiste a nada
+    nj = cfg.model_copy(update={"judge": False})
+    pipeline.run_pipeline(video, nj, transcriber=whisper, client_factory=factory)
+    sel2 = json.loads((out / "selection.json").read_text(encoding="utf-8"))
+    assert [c["title"] for c in sel2] == ["A primeira", "B segunda"] and "judge_score" not in sel2[0]
+
+
+@needs_ffmpeg
+def test_judge_failure_does_not_break_the_run(tmp_path, cfg):
+    from conftest import SmartBackend
+    from darkcnn.gemini import TransientError
+    cfg = cfg.model_copy(update={"judge": True, "clips_per_video": 2, "proxy_height": 144, "gemini_retries": 0})
+    backend = SmartBackend([cand(0, 2, score=9, title="A"), cand(3, 5, score=8, title="B"), cand(6, 8, score=7, title="C")])
+    video, whisper, _, _ = setup(tmp_path, cfg, backend)
+    orig = backend.generate
+
+    def flaky(prompt, schema, temperature, media=None):
+        if media is not None:
+            raise TransientError("503 UNAVAILABLE")
+        return orig(prompt, schema, temperature, media)
+    backend.generate = flaky
+    f = lambda: GeminiClient(backend, cfg.workspace_dir / "u.json", 40, retries=0, sleep=lambda s: None)
+    review = pipeline.run_pipeline(video, cfg, transcriber=whisper, client_factory=f)
+    sel = json.loads((review.parent / "selection.json").read_text(encoding="utf-8"))
+    assert [c["title"] for c in sel] == ["A", "B"]  # sem juiz: ordem da 1ª passada, e os cortes saíram

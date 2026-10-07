@@ -18,6 +18,10 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Default,{font},84,{white},{white},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,2,2,60,60,520,1
 Style: Title,{font},66,{white},{white},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,8,70,70,300,1
 Style: Hook,{font},86,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,2,2,60,60,330,1
+Style: Context,{font},54,{white},{white},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,5,2,8,80,80,270,1
+Style: Theme,{font},46,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,2,0,1,5,2,8,70,70,225,1
+Style: Rank,{font},300,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,12,3,5,60,60,0,1
+Style: Badge,{font},84,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,7,50,50,95,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -66,16 +70,34 @@ def _caption_events(words: list[dict], clip_start: float, clip_end: float) -> li
 
 def build_ass(clip: dict, words: list[dict], cfg: Config) -> str | None:
     """Conteúdo do .ass do corte, ou None se text_mode == 'none'."""
-    if cfg.text_mode == "none":
+    mode = cfg.text_mode
+    if mode == "none":
         return None
     head = _HEADER.format(font=cfg.font, white=WHITE, yellow=HIGHLIGHT)
     dur = clip["end"] - clip["start"]
-    if cfg.text_mode == "captions":
-        return head + "".join(_caption_events(words, clip["start"], clip["end"]))
-    # titled: título no topo + gancho embaixo, durante todo o corte
     end = ass_time(dur)
+    start = ass_time(0)
+    if mode == "captions":
+        return head + "".join(_caption_events(words, clip["start"], clip["end"]))
+    if mode == "both":  # contexto no topo (quem chega no meio da conversa entende) + legenda por palavra
+        ctx = esc(clip.get("context") or clip["title"])
+        return (head + f"Dialogue: 0,{start},{end},Context,,0,0,0,,{{\\fad(200,0)}}{ctx}\n"
+                + "".join(_caption_events(words, clip["start"], clip["end"])))
+    if mode == "ranked":  # compilado "Top N": tema fixo + título, número grande na entrada e selo fixo
+        pos = clip.get("rank_pos", 1)
+        theme = esc(clip.get("theme") or "").upper()
+        return (
+            head
+            + (f"Dialogue: 0,{start},{end},Theme,,0,0,0,,{theme}\n" if theme else "")
+            + f"Dialogue: 0,{start},{end},Title,,0,0,0,,{esc(clip['title'])}\n"
+            + f"Dialogue: 2,{start},{ass_time(min(1.4, dur))},Rank,,0,0,0,,"
+              f"{{\\fad(120,500)\\fscx150\\fscy150\\t(0,260,\\fscx100\\fscy100)}}#{pos}\n"
+            + f"Dialogue: 1,{start},{end},Badge,,0,0,0,,#{pos}\n"
+            + f"Dialogue: 1,{start},{end},Hook,,0,0,0,,{{\\fad(250,0)}}{esc(clip['hook_text']).upper()}\n"
+        )
+    # titled: título no topo + gancho embaixo, durante todo o corte
     return (
         head
-        + f"Dialogue: 0,{ass_time(0)},{end},Title,,0,0,0,,{esc(clip['title'])}\n"
-        + f"Dialogue: 1,{ass_time(0)},{end},Hook,,0,0,0,,{{\\fad(250,0)}}{esc(clip['hook_text']).upper()}\n"
+        + f"Dialogue: 0,{start},{end},Title,,0,0,0,,{esc(clip['title'])}\n"
+        + f"Dialogue: 1,{start},{end},Hook,,0,0,0,,{{\\fad(250,0)}}{esc(clip['hook_text']).upper()}\n"
     )

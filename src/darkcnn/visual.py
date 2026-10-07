@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import cache
 from .analyze import PROMPTS_DIR, Candidate, fmt_ts, n_candidates
@@ -30,6 +30,14 @@ class VisualCandidate(Candidate):
 
 class VisualSelection(BaseModel):
     candidates: list[VisualCandidate]
+
+
+class ThemeCandidate(VisualCandidate):
+    fit: int = Field(ge=1, le=10)  # o quanto é um exemplo forte do tema do compilado
+
+
+class ThemeSelection(BaseModel):
+    candidates: list[ThemeCandidate]
 
 
 # ---------------------------------------------------------------- texto
@@ -55,9 +63,17 @@ def shots_table(win: list[Shot]) -> str:
 
 
 def build_prompt(win: list[Shot], cfg: Config) -> str:
-    tpl = (PROMPTS_DIR / "select_visual_v1.md").read_text(encoding="utf-8")
+    tpl = (PROMPTS_DIR / f"{cfg.visual_prompt_version}.md").read_text(encoding="utf-8")
     dur = win[-1]["end"] - win[0]["start"]
     return tpl.format(window_len=f"{dur / 60:.0f} min" if dur >= 90 else f"{dur:.0f} s",
+                      shots=shots_table(win), n_candidates=n_candidates(cfg),
+                      min_s=int(cfg.min_clip_s), max_s=int(cfg.max_clip_s))
+
+
+def build_theme_prompt(win: list[Shot], cfg: Config, theme: str | None = None) -> str:
+    tpl = (PROMPTS_DIR / f"{cfg.theme_prompt_version}.md").read_text(encoding="utf-8")
+    dur = win[-1]["end"] - win[0]["start"]
+    return tpl.format(window_len=f"{dur / 60:.0f} min" if dur >= 90 else f"{dur:.0f} s", theme=theme or cfg.theme,
                       shots=shots_table(win), n_candidates=n_candidates(cfg),
                       min_s=int(cfg.min_clip_s), max_s=int(cfg.max_clip_s))
 
@@ -138,9 +154,14 @@ def reconcile(c: dict[str, Any], shots: list[Shot], window_start: float,
 # ---------------------------------------------------------------- seleção por janela
 def select_visual(video: Path, vid: str, ws: Path, shots: list[Shot], cfg: Config,
                   client_factory: Callable[[], GeminiClient], force: bool = False,
-                  sleep: Callable[[float], None] = time.sleep) -> tuple[list[dict], dict]:
+                  sleep: Callable[[float], None] = time.sleep, *, theme: str | None = None) -> tuple[list[dict], dict]:
     """Uma chamada ao Gemini por janela (com cache por janela: falha na janela 3 não refaz a 1 e a 2).
     Devolve (candidatos com IDs reconciliados, estatísticas)."""
+    # com tema: prompt, schema e cache próprios (o mesmo vídeo pode gerar vários compilados com temas diferentes)
+    schema = ThemeSelection if theme else VisualSelection
+    build = (lambda w, c: build_theme_prompt(w, c, theme)) if theme else build_prompt
+    tag = f"{cfg.theme_prompt_version}:{theme}" if theme else cfg.visual_prompt_version
+    prefix = "theme" if theme else "win"
     windows = make_windows(shots, cfg.visual_window_min * 60)
     total_min = (shots[-1]["end"] - shots[0]["start"]) / 60
     log.info("%d janela(s) de vídeo; enviar tudo ≈ %.0f mil tokens do Gemini",
@@ -150,10 +171,10 @@ def select_visual(video: Path, vid: str, ws: Path, shots: list[Shot], cfg: Confi
     client: GeminiClient | None = None
 
     for i, win in enumerate(windows):
-        path = ws / "analysis" / f"win_{i:02d}.json"
+        path = ws / "analysis" / f"{prefix}_{i:02d}.json"
         key = cache.key_of(v=1, vid=vid, win=i, table=shots_table(win), model=cfg.gemini_model,
-                           prompt="select_visual_v1", n=n_candidates(cfg), min=cfg.min_clip_s,
-                           max=cfg.max_clip_s, fps=cfg.visual_fps, h=cfg.proxy_height)
+                           prompt=tag, n=n_candidates(cfg), min=cfg.min_clip_s,
+                           max=cfg.max_clip_s, fps=cfg.visual_fps, h=cfg.proxy_height, thinking=cfg.thinking_level)
         cands = None if force else cache.load(path, key)
         if cands is None:
             if stats["api_calls"]:
@@ -164,7 +185,7 @@ def select_visual(video: Path, vid: str, ws: Path, shots: list[Shot], cfg: Confi
             proxy = make_proxy(video, win, ws / "proxy" / f"win_{i:02d}.mp4", cfg, ws / "proxy" / f"tmp_{i:02d}")
             log.info("enviando %.1f MB ao Gemini (%s)…", proxy.stat().st_size / 1e6, cfg.gemini_model)
             client = client or client_factory()
-            sel = client.generate_json(build_prompt(win, cfg), VisualSelection, media=proxy)
+            sel = client.generate_json(build(win, cfg), schema, media=proxy)
             cands = [c.model_dump() for c in sel.candidates]
             cache.save(path, key, cands)
             stats["api_calls"] += 1

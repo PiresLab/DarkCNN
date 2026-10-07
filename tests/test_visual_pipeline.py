@@ -19,13 +19,14 @@ def test_visual_profile_defaults_to_titled_unless_user_chose():
     assert pipeline.effective_cfg(Config(profile="visual"), {}).text_mode == "titled"
     assert pipeline.effective_cfg(Config(profile="visual", text_mode="none"), {}).text_mode == "none"
     assert pipeline.effective_cfg(Config(profile="visual", text_mode="captions"), {}).text_mode == "captions"
-    assert pipeline.effective_cfg(Config(), {}).text_mode == "captions"  # perfil de fala não muda
+    assert pipeline.effective_cfg(Config(), {}).text_mode == "both"  # fala: contexto no topo + legenda
+    assert pipeline.effective_cfg(Config(text_mode="captions"), {}).text_mode == "captions"
 
 
 @needs_ffmpeg
 def test_visual_end_to_end_cuts_land_on_shot_boundaries(tmp_path):
     video = make_cut_video(tmp_path / "nocautes.mp4")  # 6 planos de 10 s; 1 e 4 são altos
-    cfg = Config(profile="visual", min_clip_s=8, max_clip_s=25, clips_per_video=2, preset="ultrafast",
+    cfg = Config(profile="visual", judge=False, min_clip_s=8, max_clip_s=25, clips_per_video=2, preset="ultrafast",
                  proxy_height=144, source="https://www.youtube.com/watch?v=abc", license="CC-BY 4.0",
                  workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out")
     backend = FakeBackend([
@@ -90,10 +91,30 @@ def test_visual_profile_on_a_video_without_audio_and_with_no_cuts(tmp_path):
     subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
                     "testsrc2=size=320x180:rate=25:duration=40", "-c:v", "libx264", "-preset", "ultrafast",
                     "-pix_fmt", "yuv420p", str(video)], check=True)
-    cfg = Config(profile="visual", min_clip_s=8, max_clip_s=25, clips_per_video=1, preset="ultrafast",
+    cfg = Config(profile="visual", judge=False, min_clip_s=8, max_clip_s=25, clips_per_video=1, preset="ultrafast",
                  proxy_height=144, max_shot_s=10, workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out")
     backend = FakeBackend([vc(1, 2, "00:10", "00:30", score=8, title="Satisfatório")])
     review = pipeline.run_pipeline(video, cfg, client_factory=factory(backend, cfg))
     sel = json.loads((review.parent / "selection.json").read_text(encoding="utf-8"))
     assert len(sel) == 1 and (sel[0]["start"], sel[0]["end"]) == (pytest.approx(10.0), pytest.approx(30.0))
     assert "volume" not in backend.prompts[0].split("<planos>")[1].split("</planos>")[0]  # sem áudio, sem volume
+
+
+@needs_ffmpeg
+def test_visual_with_judge_reorders_by_what_it_watched(tmp_path):
+    from conftest import SmartBackend
+    video = make_cut_video(tmp_path / "nocautes.mp4")
+    cfg = Config(profile="visual", judge=True, min_clip_s=8, max_clip_s=25, clips_per_video=2, preset="ultrafast",
+                 proxy_height=144, workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out")
+    backend = SmartBackend(
+        [vc(0, 1, "00:00", "00:20", score=9, title="Um"), vc(2, 3, "00:20", "00:40", score=8, title="Dois"),
+         vc(4, 5, "00:40", "01:00", score=7, title="Tres")],
+        judge_plan={"A2": (90, True, ""), "A1": (70, True, ""), "A3": (50, True, "")})
+    review = pipeline.run_pipeline(video, cfg, client_factory=factory(backend, cfg))
+    sel = json.loads((review.parent / "selection.json").read_text(encoding="utf-8"))
+    assert [(c["title"], c["rank"], c["judge_score"]) for c in sel] == [("Dois", 1, 90), ("Um", 2, 70)]
+    assert backend.calls == 2 and backend.judge_calls == 1  # 1 janela de seleção + 1 do juiz
+    assert backend.media[0] is not None and backend.media[1] is not None  # ambos recebem vídeo
+    rej = json.loads((review.parent / "rejected.json").read_text(encoding="utf-8"))
+    assert [r["reason_rejected"] for r in rej if r["title"] == "Tres"] == ["acima da quantidade pedida"]
+    assert len(list(review.parent.glob("*.mp4"))) == 2

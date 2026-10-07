@@ -37,6 +37,16 @@ class Selection(BaseModel):
     candidates: list[Candidate]
 
 
+class TalkCandidate(Candidate):
+    """Candidato do perfil de fala: + contexto para o topo da tela e a frase do gancho (verificável)."""
+    context: str  # descritivo, <= 80 caracteres: situa quem chega no meio da conversa
+    hook_quote: str  # frase do gancho COPIADA da transcrição
+
+
+class TalkSelection(BaseModel):
+    candidates: list[TalkCandidate]
+
+
 def fmt_ts(sec: float) -> str:
     s = int(sec)
     return f"{s // 60:02d}:{s % 60:02d}"
@@ -51,8 +61,14 @@ def transcript_hash(sentences: list[Sentence]) -> str:
 
 
 def n_candidates(cfg: Config) -> int:
-    """Pede o dobro: o código descarta os inválidos/sobrepostos e fica com os N melhores."""
-    return cfg.clips_per_video * 2
+    """Quantos candidatos pedir: com juiz, mais opções para ele comparar; sem juiz, o dobro (o código
+    descarta inválidos/sobrepostos e fica com os N melhores)."""
+    return cfg.clips_per_video * (cfg.judge_factor if cfg.judge else 2)
+
+
+def pool_size(cfg: Config) -> int:
+    """Quantos candidatos já resolvidos seguem para o juiz (ou, sem juiz, quantos cortes saem)."""
+    return min(cfg.judge_max_candidates, n_candidates(cfg)) if cfg.judge else cfg.clips_per_video
 
 
 def build_prompt(sentences: list[Sentence], cfg: Config) -> str:
@@ -63,6 +79,38 @@ def build_prompt(sentences: list[Sentence], cfg: Config) -> str:
         max_s=int(cfg.max_clip_s),
         transcript=build_transcript(sentences),
     )
+
+
+def _norm_tokens(text: str) -> list[str]:
+    import re
+    import unicodedata
+
+    t = unicodedata.normalize("NFD", text.lower())
+    t = "".join(ch for ch in t if unicodedata.category(ch) != "Mn")
+    return re.findall(r"[a-z0-9]+", t)
+
+
+def hook_quote_ok(quote: str, sentences: list[Sentence], start_id: int, span: int = 2,
+                  min_overlap: float = 0.7) -> bool:
+    """A frase do gancho que o modelo citou está mesmo no começo do corte? (anti-alucinação)"""
+    q = _norm_tokens(quote)
+    if len(q) < 3 or not (0 <= start_id < len(sentences)):
+        return False
+    window = set(_norm_tokens(" ".join(s["text"] for s in sentences[start_id:start_id + span + 1])))
+    return sum(1 for t in q if t in window) / len(q) >= min_overlap
+
+
+def verify_hooks(cands: list[dict[str, Any]], sentences: list[Sentence], penalty: int = 2) -> int:
+    """Marca `hook_ok` e tira `penalty` pontos da nota de quem cita um gancho que não está na transcrição.
+    Devolve quantos falharam."""
+    bad = 0
+    for c in cands:
+        ok = hook_quote_ok(c.get("hook_quote", ""), sentences, c["start_id"])
+        c["hook_ok"] = ok
+        if not ok:
+            bad += 1
+            c["score"] = max(1, c["score"] - penalty)
+    return bad
 
 
 def _clip(text: str, n: int) -> str:
@@ -126,6 +174,7 @@ def resolve(
             **c,
             "start_id": s, "end_id": e,
             "title": _clip(c["title"], 60), "hook_text": _clip(c["hook_text"], 40),
+            **({"context": _clip(c["context"], 80)} if c.get("context") else {}),
             "start": round(start, 3), "end": round(end, 3), "duration": round(dur, 3),
             "adjusted": adjusted,
         })

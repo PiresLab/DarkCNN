@@ -16,8 +16,8 @@ def build_parser() -> argparse.ArgumentParser:
     def common(sp: argparse.ArgumentParser) -> None:
         sp.add_argument("input", metavar="VIDEO_OU_LINK", help="arquivo de vídeo local OU link http(s) (baixado com yt-dlp)")
         sp.add_argument("--config", type=Path, help="config.yaml (padrão: ./config.yaml se existir)")
-        sp.add_argument("--text-mode", dest="text_mode", choices=["captions", "titled", "none"],
-                        help="captions = legenda por palavra; titled = título no topo + gancho embaixo")
+        sp.add_argument("--text-mode", dest="text_mode", choices=["captions", "titled", "both", "none"],
+                        help="captions = legenda por palavra; titled = título + gancho; both = contexto no topo + legenda (padrão do talk)")
         sp.add_argument("--profile", choices=["talk", "visual"],
                         help="talk = vídeo com fala (padrão); visual = sem fala (nocautes, satisfatórios)")
         sp.add_argument("--scene-threshold", dest="scene_threshold", type=float,
@@ -37,13 +37,31 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--clips", dest="clips_per_video", type=int, help="quantidade de cortes")
     r.add_argument("--min", dest="min_clip_s", type=float, help="duração mínima (s)")
     r.add_argument("--max", dest="max_clip_s", type=float, help="duração máxima (s)")
+    r.add_argument("--thinking-level", dest="thinking_level", choices=["off", "low", "medium", "high"],
+                   help="raciocínio do Gemini na seleção (padrão medium; mais alto = melhor e mais lento)")
+    r.add_argument("--judge-model", dest="judge_model", help="modelo do juiz (padrão: o mesmo de --model)")
+    r.add_argument("--no-judge", dest="judge", action="store_const", const=False,
+                   help="pula a 2ª passada (juiz) que compara os candidatos assistindo a eles")
     r.add_argument("--force", action="store_true", help="ignora o cache de transcrição e de análise")
+
+    cp = sub.add_parser("compile", help='monta UM compilado "Top N" (contagem regressiva) a partir de um vídeo')
+    common(cp)
+    cp.add_argument("--theme", required=True, help='tema do compilado, ex.: "top 5 finalizações"')
+    cp.add_argument("--clips", dest="clips_per_video", type=int, help="quantos momentos no top (padrão 5)")
+    cp.add_argument("--min", dest="min_clip_s", type=float, help="duração mínima de cada trecho (padrão 8 s)")
+    cp.add_argument("--max", dest="max_clip_s", type=float, help="duração máxima de cada trecho (padrão 25 s)")
+    cp.add_argument("--model", dest="gemini_model", help="ID do modelo Gemini")
+    cp.add_argument("--thinking-level", dest="thinking_level", choices=["off", "low", "medium", "high"])
+    cp.add_argument("--judge-model", dest="judge_model")
+    cp.add_argument("--no-judge", dest="judge", action="store_const", const=False)
+    cp.add_argument("--force", action="store_true", help="ignora o cache de análise")
 
     sh = sub.add_parser("shots", help="diagnóstico do perfil visual: planos e volume (não usa o Gemini)")
     common(sh)
 
     rr = sub.add_parser("render", help="re-renderiza a partir do selection.json editado (sem Whisper/Gemini)")
     common(rr)
+    rr.add_argument("--theme", help="se o selection.json for de um compilado, o tema dele (remonta o compilado)")
     return p
 
 
@@ -57,13 +75,15 @@ def main(argv: list[str] | None = None) -> int:
               f"'{args.input}' é que será processado. Para baixar o link, rode: darkcnn {args.cmd} \"{args.source}\"",
               file=sys.stderr)
 
-    from .pipeline import render_from_selection, run_pipeline, shots_report
+    from .pipeline import render_from_selection, run_compile, run_pipeline, shots_report
 
     try:
         if args.cmd == "shots":
             print("\n" + shots_report(args.input, cfg))
             return 0
-        if args.cmd == "run":
+        if args.cmd == "compile":
+            review = run_compile(args.input, cfg, force=args.force)
+        elif args.cmd == "run":
             review = run_pipeline(args.input, cfg, force=args.force)
         else:
             review = render_from_selection(args.input, cfg)

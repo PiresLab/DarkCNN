@@ -11,7 +11,7 @@ TOTAL = 60.0
 
 
 def cfg(**kw):
-    base = dict(min_clip_s=8, max_clip_s=20, clips_per_video=3)
+    base = dict(min_clip_s=8, max_clip_s=20, clips_per_video=3, judge=False)
     base.update(kw)
     return Config(**base)
 
@@ -28,8 +28,9 @@ def test_build_transcript_has_ids_and_clock():
 
 def test_prompt_survives_braces_in_transcript():
     s = [{"id": 0, "start": 0, "end": 3, "text": "olha {isso} aqui {0}"}]
-    p = analyze.build_prompt(s, cfg())
-    assert "olha {isso} aqui {0}" in p and "até 6 trechos" in p and "entre 8 e 20" in p
+    c = cfg()
+    p = analyze.build_prompt(s, c)
+    assert "olha {isso} aqui {0}" in p and f"até {analyze.n_candidates(c)} trechos" in p and "entre 8 e 20" in p
 
 
 def test_times_use_full_padding_when_there_is_silence():
@@ -103,3 +104,34 @@ def test_ranks_follow_score_and_text_is_truncated():
     assert [c["rank"] for c in acc] == [1, 2] and acc[0]["score"] == 9
     low = [c for c in acc if c["score"] == 5][0]
     assert len(low["title"]) <= 60 and len(low["hook_text"]) <= 40 and low["title"].endswith("…")
+
+
+def test_candidate_counts_depend_on_judge():
+    on, off = Config(clips_per_video=5, judge=True), Config(clips_per_video=5, judge=False)
+    assert analyze.n_candidates(on) == 15 and analyze.n_candidates(off) == 10
+    assert analyze.pool_size(on) == 12 and analyze.pool_size(off) == 5  # teto de 12 para o juiz assistir
+    assert analyze.pool_size(Config(clips_per_video=2, judge=True)) == 6
+
+
+S2 = [{"id": 0, "start": 0, "end": 4, "text": "Você sabia que a cerveja sem álcool pode dar positivo?"},
+      {"id": 1, "start": 4, "end": 8, "text": "Pois é, eu também não acreditava."},
+      {"id": 2, "start": 8, "end": 12, "text": "Aí fui pesquisar a fundo."}]
+
+
+def test_hook_quote_matches_even_with_accents_punctuation_and_small_errors():
+    ok = analyze.hook_quote_ok
+    assert ok("Você sabia que a cerveja sem álcool pode dar positivo", S2, 0)
+    assert ok("voce sabia que a cerveja sem alcool pode dar positivo?", S2, 0)  # sem acento/pontuação
+    assert ok("sabia que a cerveja sem álcool pode dar um positivo", S2, 0)  # 1 palavra a mais
+    assert ok("Pois é eu também não acreditava", S2, 0)  # na frase seguinte ainda conta (janela de 2)
+    assert not ok("A inflação subiu forte no último trimestre", S2, 0)  # inventada
+    assert not ok("sim sim", S2, 0) and not ok("", S2, 0)  # curta/vazia não verifica
+    assert not ok("Você sabia que a cerveja", S2, 99)  # id inválido
+
+
+def test_verify_hooks_penalizes_invented_quotes_only():
+    cands = [{"start_id": 0, "score": 8, "hook_quote": "Você sabia que a cerveja sem álcool pode dar positivo"},
+             {"start_id": 1, "score": 8, "hook_quote": "frase totalmente inventada pelo modelo agora"},
+             {"start_id": 2, "score": 1, "hook_quote": ""}]
+    assert analyze.verify_hooks(cands, S2) == 2
+    assert [(c["hook_ok"], c["score"]) for c in cands] == [(True, 8), (False, 6), (False, 1)]  # nota nunca < 1

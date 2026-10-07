@@ -65,3 +65,26 @@ def extract_wav(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src,
          "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", dst])
+
+
+def concat_copy(parts: list[Path], dest: Path, reencode_audio: bool = False) -> Path:
+    """Junta arquivos de MESMA codificação sem recodificar o vídeo (demuxer concat). Todos os trechos
+    precisam ter sido gerados com os mesmos parâmetros. `reencode_audio` refaz só o áudio (AAC)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    listfile = dest.with_suffix(".txt")
+    lines = []
+    for p in parts:
+        posix = Path(p).resolve().as_posix().replace("'", "'\\''")
+        lines.append(f"file '{posix}'\n")
+    listfile.write_text("".join(lines), encoding="utf-8")
+    tmp = dest.with_name(dest.stem + ".tmp" + dest.suffix)
+    audio = ["-c:a", "aac", "-b:a", "192k"] if reencode_audio else ["-c:a", "copy"]
+    try:
+        run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
+             "-i", listfile, "-c:v", "copy", *audio, "-movflags", "+faststart", tmp])
+        dest.unlink(missing_ok=True)
+        tmp.replace(dest)
+    finally:
+        listfile.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
+    return dest

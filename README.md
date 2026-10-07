@@ -39,16 +39,60 @@ com link `&t=` no YouTube), `selection.json` (editável) e `rejected.json` (cand
 
 | Opção | O que faz |
 |---|---|
-| `--text-mode captions` | legenda por palavra, palavra falada em amarelo (padrão) |
+| `--text-mode both` | **contexto no topo** (uma linha que situa quem chega no meio da conversa) + legenda por palavra (padrão do `--profile talk`) |
+| `--text-mode captions` | só a legenda por palavra, palavra falada em amarelo |
 | `--text-mode titled` | **título no topo + frase-gancho embaixo**, sem legenda de fala (padrão do `--profile visual`) |
 | `--text-mode none` | sem texto |
+| `compile --theme "…"` | monta um compilado "Top N" num vídeo só (veja a seção acima) |
 | `--profile talk` / `visual` | vídeo com fala (padrão) / sem fala: escolhe olhando o vídeo |
 | `--layout blur` / `crop` | vídeo inteiro sobre fundo desfocado (padrão) / corte central 9:16 |
 | `--watermark logo.png` | PNG com alpha (posição e opacidade no `config.yaml`) |
 | `--clips 5 --min 30 --max 60` | quantidade e duração dos cortes |
 | `--model ID` | modelo Gemini (veja os IDs com `python spikes\03_gemini_probe.py --list-models`) |
 | `--preset veryfast` | render mais rápido, arquivo maior (padrão `medium`) |
+| `--model ID` / `--thinking-level high` | modelo e nível de raciocínio da seleção (veja "Como a IA escolhe") |
+| `--judge-model ID` / `--no-judge` | modelo do juiz / pula a 2ª passada |
 | `--force` | ignora o cache de transcrição e de análise |
+
+## Compilado "Top N" (um vídeo só, contagem regressiva)
+Para transformar **um** vídeo-fonte (ex.: uma compilação de lutas) em **um** vídeo "top 5 finalizações", "top 5 reviravoltas":
+```powershell
+python -m darkcnn compile "https://youtu.be/XXXX" --theme "top 5 finalizações"
+```
+Sai `output\<video>\compilado_top-5-finalizacoes.mp4` (1080x1920) com os momentos em **contagem regressiva** (#5 → #1: o melhor
+por último). Cada trecho mostra o tema fixo e o título no topo, um selo `#N` no canto, o número grande na entrada e a
+frase-gancho embaixo. Padrões: 5 momentos de 8 a 25 s (`--clips`, `--min`, `--max`).
+
+Como funciona: o Gemini procura só os momentos que **são exemplos fortes do tema** (dá uma nota de encaixe e descarta
+os que não combinam), depois o **juiz** assiste a todos e os ranqueia comparando, e o código monta o vídeo. Se houver
+menos momentos bons do que o pedido, o compilado sai com menos e o `review.md` avisa (melhor poucos e fortes).
+O `review.md` lista cada trecho (posição, minuto na fonte com link, minuto no compilado, notas) e repete a licença
+da fonte, que vale para todos os trechos. Passa de 3 min? Ele avisa (limite do YouTube Shorts).
+
+**Mudar a ordem ou os limites:** edite `rank`, `start`, `end` ou `title` no `selection.json` (o `rank` define a posição) e rode
+`python -m darkcnn render "<link>" --theme "top 5 finalizações"`: só os trechos alterados são renderizados de novo.
+
+## Como a IA escolhe os cortes (e como melhorar)
+A escolha tem **duas passadas**:
+1. **Seleção:** o Gemini lê a transcrição (fala) ou assiste ao vídeo em janelas (sem fala) e propõe ~3× mais candidatos
+   do que você pediu, cada um com título, contexto, gancho e notas. No perfil de fala ele também copia a frase do gancho,
+   e o código confere se ela existe mesmo na transcrição (se não, a nota cai: sinal de alucinação).
+2. **Juiz:** o código corta os candidatos nos tempos exatos, junta todos num vídeo único (rótulo A1, A2… no canto) e o
+   Gemini **assiste e ouve** cada um, **comparando-os entre si** (nota 1-100 sem empates, ponto forte e fraco, e veta os
+   que não publicaria). O ranking final é o do juiz. Se o juiz falhar, vale a ordem da 1ª passada.
+
+O `review.md` mostra a nota da 1ª passada, a do juiz e o motivo, para você ver onde a IA mudou de ideia e julgar quem acerta mais.
+
+Alavancas, da que mais pesa para a que menos pesa:
+- **Modelo:** `--model gemini-3.5-flash` (ou 3.6/3.7/3.8) costuma julgar melhor que o `flash-lite`; veja os IDs com
+  `python spikes\03_gemini_probe.py --list-models`. Modelos maiores podem ter limite menor no free tier: se aparecer erro 429,
+  volte ao anterior ou espere.
+- **Raciocínio:** `--thinking-level high` deixa o modelo "pensar" mais antes de responder (mais lento, melhor). Se o modelo
+  não aceitar, o programa desliga sozinho e avisa.
+- **`--no-judge`** para comparar com e sem a 2ª passada no mesmo vídeo (a transcrição e a 1ª passada ficam em cache).
+
+Isso melhora as chances, não garante: o gosto final é seu. Rode 2 ou 3 vídeos e veja se os cortes que você postaria
+estão entre os primeiros.
 
 ## Vídeos sem fala (nocautes, vídeos satisfatórios): `--profile visual`
 Sem fala não há transcrição, então o programa escolhe os momentos olhando o vídeo:

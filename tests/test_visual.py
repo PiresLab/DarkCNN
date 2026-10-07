@@ -27,8 +27,10 @@ def test_table_uses_times_relative_to_the_window_and_global_ids():
     win = SH[3:6]  # janela que começa em 30 s
     t = V.shots_table(win).splitlines()
     assert t[0] == "[3] 00:00–00:10 (10s)" and t[1].startswith("[4] 00:10–00:20 (10s) volume +12dB")
-    p = V.build_prompt(win, Config(min_clip_s=8, max_clip_s=25, clips_per_video=3))
-    assert "[5] 00:20–00:30" in p and "até 6 momentos" in p and "entre 8 e 25" in p and "30 s" in p
+    c = Config(min_clip_s=8, max_clip_s=25, clips_per_video=3)
+    p = V.build_prompt(win, c)
+    from darkcnn.analyze import n_candidates
+    assert "[5] 00:20–00:30" in p and f"até {n_candidates(c)} momentos" in p and "entre 8 e 25" in p and "30 s" in p
     assert "{" not in p.replace("{", "", 0) or True  # sem placeholders não substituídos:
     assert "{shots}" not in p and "{n_candidates}" not in p
 
@@ -98,7 +100,7 @@ class PerCall(FakeBackend):
 @needs_ffmpeg
 def test_select_visual_windows_cache_pause_and_reconcile(tmp_path):
     video = make_cut_video(tmp_path / "v.mp4")
-    cfg = Config(min_clip_s=8, max_clip_s=25, clips_per_video=2, visual_window_min=0.5, proxy_height=144,
+    cfg = Config(min_clip_s=8, max_clip_s=25, clips_per_video=2, visual_window_min=0.5, proxy_height=144, judge=False,
                  visual_pause_s=7, workspace_dir=tmp_path / "ws")
     # 2 janelas de 30 s: planos 0-2 e 3-5. A 2ª resposta lê o número errado (usa IDs da janela 1)
     backend = PerCall([[vc(1, 2, "00:10", "00:30", score=9)], [vc(1, 2, "00:10", "00:30", score=8)]])
