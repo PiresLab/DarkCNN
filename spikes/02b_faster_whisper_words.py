@@ -12,9 +12,24 @@ Modelos: tiny, base, small, medium, large-v3-turbo. O 1º uso baixa o modelo soz
 from __future__ import annotations
 
 import argparse
+import os
 import time
+import wave
+
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")  # aviso inofensivo no Windows
 
 from common import OUT, probe_duration, run, save_json
+
+
+def load_wav(path):
+    """WAV 16 kHz mono -> float32. Entregar array ao faster-whisper evita o decoder PyAV dele,
+    que quebra em algumas combinações de versões (TypeError: open() ... 'metadata_errors')."""
+    import numpy as np
+
+    with wave.open(str(path), "rb") as w:
+        assert w.getframerate() == 16000 and w.getnchannels() == 1 and w.getsampwidth() == 2
+        raw = w.readframes(w.getnframes())
+    return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
 def main() -> None:
@@ -48,7 +63,7 @@ def main() -> None:
     print(f"Transcrevendo {audio_s:.0f}s de áudio… (um ponto a cada 10 segmentos)")
     t0 = time.perf_counter()
     segments, info = model.transcribe(
-        str(wav), language=args.lang, word_timestamps=True, beam_size=args.beam,
+        load_wav(wav), language=args.lang, word_timestamps=True, beam_size=args.beam,
         vad_filter=args.vad, condition_on_previous_text=False,
     )
     words, nseg = [], 0
