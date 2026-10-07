@@ -29,6 +29,16 @@ class Config(BaseModel):
     gemini_retries: int = Field(3, ge=0)
     gemini_backoff_s: float = 5.0
 
+    # --- perfil: talk = vídeo com fala (transcrição); visual = sem fala (planos + vídeo para o Gemini) ---
+    profile: Literal["talk", "visual"] = "talk"
+    scene_threshold: float = Field(0.30, gt=0, lt=1)  # sensibilidade do detector de corte de cena
+    min_shot_s: float = 1.5  # planos menores que isso são fundidos ao vizinho
+    max_shot_s: float = 12.0  # plano contínuo maior que isso é dividido (senão não haveria onde cortar)
+    visual_window_min: float = 10.0  # minutos de vídeo por chamada ao Gemini
+    visual_fps: int = 2  # quadros/s do vídeo enviado (o Gemini amostra ~1 fps)
+    proxy_height: int = 360  # altura do vídeo enviado ao Gemini
+    visual_pause_s: float = 15.0  # espera entre janelas (o limite de tokens/min do free tier)
+
     # --- seleção dos cortes ---
     min_clip_s: float = Field(30.0, gt=0)
     max_clip_s: float = Field(60.0, gt=0)

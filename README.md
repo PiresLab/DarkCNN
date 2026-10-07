@@ -40,14 +40,37 @@ com link `&t=` no YouTube), `selection.json` (editável) e `rejected.json` (cand
 | Opção | O que faz |
 |---|---|
 | `--text-mode captions` | legenda por palavra, palavra falada em amarelo (padrão) |
-| `--text-mode titled` | **título no topo + frase-gancho embaixo**, sem legenda de fala (nocautes, vídeos satisfatórios) |
+| `--text-mode titled` | **título no topo + frase-gancho embaixo**, sem legenda de fala (padrão do `--profile visual`) |
 | `--text-mode none` | sem texto |
+| `--profile talk` / `visual` | vídeo com fala (padrão) / sem fala: escolhe olhando o vídeo |
 | `--layout blur` / `crop` | vídeo inteiro sobre fundo desfocado (padrão) / corte central 9:16 |
 | `--watermark logo.png` | PNG com alpha (posição e opacidade no `config.yaml`) |
 | `--clips 5 --min 30 --max 60` | quantidade e duração dos cortes |
 | `--model ID` | modelo Gemini (veja os IDs com `python spikes\03_gemini_probe.py --list-models`) |
 | `--preset veryfast` | render mais rápido, arquivo maior (padrão `medium`) |
 | `--force` | ignora o cache de transcrição e de análise |
+
+## Vídeos sem fala (nocautes, vídeos satisfatórios): `--profile visual`
+Sem fala não há transcrição, então o programa escolhe os momentos olhando o vídeo:
+```powershell
+python -m darkcnn shots "https://youtu.be/XXXX"      # 1) diagnóstico, não usa o Gemini: quantos cortes de cena?
+python -m darkcnn run "https://youtu.be/XXXX" --profile visual --clips 3 --min 15 --max 40
+```
+O texto na tela vira **título no topo + frase-gancho embaixo** (`--text-mode titled`, o padrão desse perfil).
+
+Como funciona: o código detecta os cortes de edição (planos) e mede o volume de cada um (reação da plateia,
+impacto). Para cada janela de ~10 min ele monta um vídeo pequeno (360p) com o **número do plano gravado no canto**
+e pede ao Gemini os melhores momentos **por número de plano**: o corte começa e termina sempre num corte de
+edição, nunca no meio de um golpe. Se o Gemini errar o número, o código confere com o tempo que ele informou e
+corrige. Cada janela fica em cache: se uma falhar, as outras não são refeitas.
+
+- **Calibrar o `shots`:** compilações têm muitos cortes. Se o número de planos parecer baixo ou alto demais,
+  ajuste com `--scene-threshold` (menor = mais cortes; padrão 0.30). Vídeo contínuo sem cortes é dividido a cada
+  `max_shot_s` (12 s) para ter onde cortar.
+- **Custo no free tier:** ≈ 100 mil tokens por 10 min de vídeo (medido). O log mostra a estimativa antes de enviar.
+  Há uma pausa entre janelas (`visual_pause_s`) por causa do limite de tokens por minuto.
+- **Confira os nomes:** títulos como "Fulano nocauteia Sicrano" vêm do Gemini e podem estar errados. O prompt
+  manda não citar nomes sem ter certeza, e o `review.md` avisa para conferir.
 
 **Ajustar um corte:** edite `start`/`end`/`title`/`hook_text` em `selection.json` e rode
 `python -m darkcnn render video.mp4` (re-renderiza só os cortes alterados; não usa Whisper nem Gemini).
@@ -56,10 +79,10 @@ com link `&t=` no YouTube), `selection.json` (editável) e `rejected.json` (cand
 chamadas ao Gemini e não renderiza de novo o que não mudou. O uso diário da API fica em `workspace\usage.json`
 e há uma trava (`daily_request_budget`) contra estourar a cota.
 
-## Limites conhecidos (Fase 1)
-- A seleção ainda depende da **fala** (transcrição). Vídeos **sem fala** (nocautes, satisfatórios) entram na
-  Fase 2: hoje o modo `--text-mode titled` já coloca título e gancho, mas a escolha dos trechos precisa de áudio falado.
-- Uma única chamada de análise por vídeo: acima de ~40 min a qualidade pode cair (janelas na Fase 3).
+## Limites conhecidos
+- O perfil (`talk` ou `visual`) é escolhido por você com `--profile`; ainda não há detecção automática.
+- Perfil de fala: uma única chamada de análise por vídeo, acima de ~40 min a qualidade pode cair (janelas na Fase 3).
+  Perfil visual: já usa janelas, mas escolhe os melhores de cada janela sem uma 2ª passada comparando entre elas.
 - Rastreio de rosto fica para a Fase 3. Se o YouTube mudar e o download falhar: `pip install -U yt-dlp`.
 
 ## Direitos autorais e plataformas

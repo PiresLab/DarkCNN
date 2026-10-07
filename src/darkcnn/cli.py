@@ -18,6 +18,10 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--config", type=Path, help="config.yaml (padrão: ./config.yaml se existir)")
         sp.add_argument("--text-mode", dest="text_mode", choices=["captions", "titled", "none"],
                         help="captions = legenda por palavra; titled = título no topo + gancho embaixo")
+        sp.add_argument("--profile", choices=["talk", "visual"],
+                        help="talk = vídeo com fala (padrão); visual = sem fala (nocautes, satisfatórios)")
+        sp.add_argument("--scene-threshold", dest="scene_threshold", type=float,
+                        help="sensibilidade do corte de cena, 0-1 (padrão 0.30; menor = mais cortes)")
         sp.add_argument("--layout", choices=["crop", "blur"], help="crop central ou vídeo inteiro sobre fundo desfocado")
         sp.add_argument("--watermark", dest="watermark_path", type=Path, help="PNG com alpha")
         sp.add_argument("--source", help="rótulo da fonte para o review.md (NÃO baixa nada; para baixar um link, passe-o no lugar do arquivo)")
@@ -35,6 +39,9 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--max", dest="max_clip_s", type=float, help="duração máxima (s)")
     r.add_argument("--force", action="store_true", help="ignora o cache de transcrição e de análise")
 
+    sh = sub.add_parser("shots", help="diagnóstico do perfil visual: planos e volume (não usa o Gemini)")
+    common(sh)
+
     rr = sub.add_parser("render", help="re-renderiza a partir do selection.json editado (sem Whisper/Gemini)")
     common(rr)
     return p
@@ -50,9 +57,12 @@ def main(argv: list[str] | None = None) -> int:
               f"'{args.input}' é que será processado. Para baixar o link, rode: darkcnn {args.cmd} \"{args.source}\"",
               file=sys.stderr)
 
-    from .pipeline import render_from_selection, run_pipeline
+    from .pipeline import render_from_selection, run_pipeline, shots_report
 
     try:
+        if args.cmd == "shots":
+            print("\n" + shots_report(args.input, cfg))
+            return 0
         if args.cmd == "run":
             review = run_pipeline(args.input, cfg, force=args.force)
         else:

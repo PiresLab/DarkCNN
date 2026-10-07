@@ -3,6 +3,11 @@
 gemini_model: gemini-3.1-flash-lite   # veja os IDs com: python spikes/03_gemini_probe.py --list-models
 daily_request_budget: 40              # trava de segurança; ajuste quando souber a cota do seu projeto
 
+# --- perfil ---
+profile: talk                         # talk = vídeo com fala | visual = sem fala (nocautes, satisfatórios)
+# scene_threshold: 0.30               # perfil visual: menor = mais cortes de cena detectados
+# visual_window_min: 10               # perfil visual: minutos de vídeo por chamada ao Gemini
+
 # --- cortes ---
 min_clip_s: 30
 max_clip_s: 60

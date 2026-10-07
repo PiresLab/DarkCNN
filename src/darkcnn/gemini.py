@@ -36,7 +36,8 @@ class BudgetExceeded(GeminiError):
 
 
 class Backend(Protocol):
-    def generate(self, prompt: str, schema: type[BaseModel], temperature: float) -> tuple[BaseModel, dict]: ...
+    def generate(self, prompt: str, schema: type[BaseModel], temperature: float,
+                 media: Path | None = None) -> tuple[BaseModel, dict]: ...
 
 
 class GenaiBackend:
@@ -46,13 +47,24 @@ class GenaiBackend:
         self._client = genai.Client(api_key=api_key)
         self.model = model
 
-    def generate(self, prompt: str, schema: type[BaseModel], temperature: float) -> tuple[BaseModel, dict]:
+    def generate(self, prompt: str, schema: type[BaseModel], temperature: float,
+                 media: Path | None = None) -> tuple[BaseModel, dict]:
         from google.genai import errors, types
 
+        uploaded = None
         try:
+            contents: Any = prompt
+            if media is not None:  # vídeo/áudio pela File API (arquivos grandes não cabem inline)
+                uploaded = self._client.files.upload(file=str(media))
+                while uploaded.state is not None and uploaded.state.name == "PROCESSING":
+                    time.sleep(2)
+                    uploaded = self._client.files.get(name=uploaded.name)
+                if uploaded.state is not None and uploaded.state.name != "ACTIVE":
+                    raise GeminiError(f"upload falhou: estado {uploaded.state.name} {uploaded.error}")
+                contents = [uploaded, prompt]
             r = self._client.models.generate_content(
                 model=self.model,
-                contents=prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json", response_schema=schema, temperature=temperature,
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
@@ -63,6 +75,12 @@ class GenaiBackend:
             if e.code in TRANSIENT_CODES:
                 raise TransientError(msg) from e
             raise GeminiError(msg) from e
+        finally:
+            if uploaded is not None:  # o arquivo expira em ~48 h, mas não deixamos lixo
+                try:
+                    self._client.files.delete(name=uploaded.name)
+                except Exception:
+                    pass
 
         parsed = r.parsed
         if not isinstance(parsed, schema):
@@ -112,7 +130,8 @@ class GeminiClient:
         self.usage_path.parent.mkdir(parents=True, exist_ok=True)
         self.usage_path.write_text(json.dumps(data, indent=1), encoding="utf-8")
 
-    def generate_json(self, prompt: str, schema: type[BaseModel], temperature: float = 0.2) -> BaseModel:
+    def generate_json(self, prompt: str, schema: type[BaseModel], temperature: float = 0.2,
+                      media: Path | None = None) -> BaseModel:
         last: Exception | None = None
         for attempt in range(self.retries + 1):
             if self.requests_today() >= self.daily_budget:
@@ -120,7 +139,7 @@ class GeminiClient:
                     f"orçamento diário de {self.daily_budget} requisições esgotado (ajuste daily_request_budget)"
                 )
             try:
-                parsed, usage = self.backend.generate(prompt, schema, temperature)
+                parsed, usage = self.backend.generate(prompt, schema, temperature, media)
             except TransientError as e:
                 self._record(None)  # a tentativa conta na cota
                 last = e

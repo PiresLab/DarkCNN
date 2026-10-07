@@ -51,15 +51,17 @@ class FakeBackend:
         self.script = list(script or [])  # exceções/resultados a devolver na ordem
         self.calls = 0
         self.prompts: list[str] = []
+        self.media: list = []
 
-    def generate(self, prompt, schema, temperature):
+    def generate(self, prompt, schema, temperature, media=None):
         self.calls += 1
         self.prompts.append(prompt)
+        self.media.append(media)
         if self.script:
             item = self.script.pop(0)
             if isinstance(item, Exception):
                 raise item
-        return Selection(candidates=self.candidates), {"prompt_tokens": 100, "output_tokens": 50}
+        return schema(candidates=self.candidates), {"prompt_tokens": 100, "output_tokens": 50}
 
 
 @pytest.fixture
@@ -111,3 +113,24 @@ def make_fake_ydl(info: dict, video_dur: float = 60):
 
 YT_INFO = {"id": "IALW8WPhUQ4", "title": "Papo sobre a vida", "channel": "Canal Teste", "duration": 60,
            "webpage_url": "https://www.youtube.com/watch?v=IALW8WPhUQ4", "license": None}
+
+
+def make_cut_video(path: Path, seg_s: int = 10, audio: bool = True) -> Path:
+    """6 planos de seg_s s com visuais bem diferentes (cortes em seg_s*1..5). Com áudio, os planos de índice
+    1 e 4 são ALTOS e os demais baixos."""
+    srcs = ["testsrc2", "smptebars", "color=c=blue", "mandelbrot", "rgbtestsrc", "yuvtestsrc"]
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    for s in srcs:
+        sep = ":" if "=" in s else "="
+        cmd += ["-f", "lavfi", "-t", str(seg_s), "-i", f"{s}{sep}size=320x180:rate=25"]
+    total = seg_s * len(srcs)
+    fc = "".join(f"[{i}:v]setsar=1,format=yuv420p[v{i}];" for i in range(len(srcs)))
+    fc += "".join(f"[v{i}]" for i in range(len(srcs))) + f"concat=n={len(srcs)}:v=1:a=0[v]"
+    cmd += ["-f", "lavfi", "-i",
+            f"sine=frequency=440:duration={total},volume='if(between(t,{seg_s},{2 * seg_s})+between(t,{4 * seg_s},{5 * seg_s}),1.0,0.05)':eval=frame"]
+    cmd += ["-filter_complex", fc, "-map", "[v]"]
+    if audio:
+        cmd += ["-map", f"{len(srcs)}:a", "-c:a", "aac"]
+    cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(path)]
+    subprocess.run(cmd, check=True)
+    return path

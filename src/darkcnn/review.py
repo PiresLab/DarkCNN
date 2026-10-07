@@ -48,6 +48,8 @@ def write_review(out_dir: Path, video: Path, cfg: Config, clips: list[dict], rej
     if not cfg.license:
         warn.append("licença/permissão não informada (`--license`)")
     warn += license_warnings(cfg.license)
+    if cfg.profile == "visual":
+        warn.append("nomes de lutadores/eventos/pessoas no título vêm do Gemini e podem estar errados: confira")
     L = [
         f"# Revisão — {video.name}", "",
         *([f"- **Vídeo original:** {meta.get('title')} — canal {meta.get('channel')}"] if meta else []),
@@ -55,7 +57,7 @@ def write_review(out_dir: Path, video: Path, cfg: Config, clips: list[dict], rej
         f"- **Licença/permissão:** {cfg.license or '⚠ não informada'}",
         f"- **Duração do vídeo:** {fmt_ts(info['duration'])} — **Cortes:** {len(clips)} "
         f"({cfg.min_clip_s:.0f}-{cfg.max_clip_s:.0f}s) — **Modelo:** {cfg.gemini_model}",
-        f"- **Texto na tela:** {cfg.text_mode} — **Layout:** {cfg.layout}",
+        f"- **Perfil:** {cfg.profile} — **Texto na tela:** {cfg.text_mode} — **Layout:** {cfg.layout}",
     ]
     if warn:
         L += ["", "> ⚠ **Antes de postar:** " + "; ".join(warn) + "."]

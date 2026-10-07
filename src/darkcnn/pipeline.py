@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from . import analyze, cache, media, render, review
+from . import analyze, cache, media, render, review, shots as shotlib, visual
 from .config import Config
 from .gemini import GenaiBackend, GeminiClient, GeminiError
 from .ingest import apply_meta, resolve_input
@@ -109,29 +109,87 @@ def _paths(video: Path, cfg: Config) -> tuple[str, Path, Path]:
     return vid, cfg.workspace_dir / vid, cfg.output_dir / vid
 
 
+SHOTS_VERSION = 1
+
+
+def effective_cfg(cfg: Config, meta: dict) -> Config:
+    """Procedência do link + padrões do perfil: no perfil visual o texto padrão é título+gancho (não há fala)."""
+    cfg = apply_meta(cfg, meta)
+    if cfg.profile == "visual" and "text_mode" not in cfg.model_fields_set:
+        cfg = cfg.model_copy(update={"text_mode": "titled"})
+    return cfg
+
+
+def step_shots(video: Path, vid: str, ws: Path, cfg: Config, force: bool = False) -> list[dict]:
+    """Planos (cortes de edição) + volume por plano, em cache."""
+    path = ws / "shots.json"
+    key = cache.key_of(v=SHOTS_VERSION, vid=vid, thr=cfg.scene_threshold, min=cfg.min_shot_s, max=cfg.max_shot_s)
+    if not force:
+        hit = cache.load(path, key)
+        if hit is not None:
+            log.info("planos em cache (%d)", len(hit))
+            return hit
+    duration = media.probe_duration(video)
+    log.info("detectando cortes de cena (limiar %.2f)… pode levar alguns minutos", cfg.scene_threshold)
+    sh = shotlib.build_shots(shotlib.detect_cuts(video, cfg.scene_threshold), duration,
+                             cfg.min_shot_s, cfg.max_shot_s)
+    if shotlib.has_audio(video):
+        log.info("medindo o volume de cada plano…")
+        shotlib.annotate_loudness(sh, shotlib.loudness_series(video))
+    else:
+        log.info("vídeo sem áudio: sem medição de volume")
+    log.info("%d planos (duração mediana %.1fs)", len(sh), sorted(x["end"] - x["start"] for x in sh)[len(sh) // 2])
+    cache.save(path, key, sh)
+    return sh
+
+
+def shots_report(input_arg: str | Path, cfg: Config, ydl_cls: Any = None) -> str:
+    """Diagnóstico sem gastar o Gemini: quantos planos, tamanho típico e os mais barulhentos."""
+    _setup_logging()
+    ing = resolve_input(str(input_arg), cfg, ydl_cls)
+    vid, ws, _ = _paths(ing.path, cfg)
+    _setup_logging(ws)
+    sh = step_shots(ing.path, vid, ws, cfg)
+    lens = sorted(x["end"] - x["start"] for x in sh)
+    lines = [f"{len(sh)} planos; duração mediana {lens[len(lens) // 2]:.1f}s, menor {lens[0]:.1f}s, maior {lens[-1]:.1f}s",
+             f"limiar de cena {cfg.scene_threshold} (use --scene-threshold: menor = mais cortes, maior = menos)"]
+    loud = sorted((x for x in sh if x.get("loud") is not None), key=lambda x: -x["loud"])[:5]
+    if loud:
+        lines.append("planos mais barulhentos: " + ", ".join(
+            f"#{x['id']} em {analyze.fmt_ts(x['start'])} ({x['loud']:+.0f}dB)" for x in loud))
+    return "\n".join(lines)
+
+
 def run_pipeline(input_arg: str | Path, cfg: Config, *, transcriber: Transcriber = transcribe_words,
                  client_factory: Callable[[], GeminiClient] | None = None, force: bool = False,
                  ydl_cls: Any = None) -> Path:
     _setup_logging()
     ing = resolve_input(str(input_arg), cfg, ydl_cls)  # arquivo local ou download do link
     video, meta = ing.path, ing.meta
-    cfg = apply_meta(cfg, meta)
+    cfg = effective_cfg(cfg, meta)
     vid, ws, out = _paths(video, cfg)
     _setup_logging(ws)
     info = media.video_info(video)
     log.info("vídeo %s (%.1f min) -> id %s", video.name, info["duration"] / 60, vid)
-    log.info("config: layout=%s texto=%s modelo=%s cortes=%d (%.0f-%.0fs)", cfg.layout, cfg.text_mode,
-             cfg.gemini_model, cfg.clips_per_video, cfg.min_clip_s, cfg.max_clip_s)
-    if info["duration"] / 60 > cfg.max_single_window_min:
-        log.warning("vídeo > %.0f min: a análise em janelas só chega na Fase 3; a qualidade pode cair",
-                    cfg.max_single_window_min)
+    log.info("config: perfil=%s layout=%s texto=%s modelo=%s cortes=%d (%.0f-%.0fs)", cfg.profile, cfg.layout,
+             cfg.text_mode, cfg.gemini_model, cfg.clips_per_video, cfg.min_clip_s, cfg.max_clip_s)
+    factory = client_factory or (lambda: make_client(cfg))
 
-    words = step_words(video, vid, ws, cfg, transcriber, force)
-    sentences = split_sentences(words)
-    log.info("%d frases", len(sentences))
-    cands = step_select(ws, sentences, cfg, client_factory or (lambda: make_client(cfg)), force)
+    if cfg.profile == "visual":  # sem fala: planos + vídeo reduzido para o Gemini
+        words: list[dict] = []
+        units = step_shots(video, vid, ws, cfg, force)
+        cands, vstats = visual.select_visual(video, vid, ws, units, cfg, factory, force)
+        log.info("Gemini: %d chamada(s) novas, %d ID(s) corrigido(s)", vstats["api_calls"], vstats["reconciled"])
+    else:
+        if info["duration"] / 60 > cfg.max_single_window_min:
+            log.warning("vídeo > %.0f min: a análise em janelas só chega na Fase 3; a qualidade pode cair",
+                        cfg.max_single_window_min)
+        words = step_words(video, vid, ws, cfg, transcriber, force)
+        units = split_sentences(words)
+        log.info("%d frases", len(units))
+        cands = step_select(ws, units, cfg, factory, force)
 
-    clips, rejected = analyze.resolve(cands, sentences, cfg, info["duration"])
+    clips, rejected = analyze.resolve(cands, units, cfg, info["duration"])
     log.info("%d cortes aceitos, %d descartados", len(clips), len(rejected))
     if not clips:
         log.warning("nenhum corte válido; veja rejected.json (ajuste min/max ou rode com --force)")
@@ -145,11 +203,11 @@ def render_from_selection(input_arg: str | Path, cfg: Config, ydl_cls: Any = Non
     _setup_logging()
     ing = resolve_input(str(input_arg), cfg, ydl_cls)
     video, meta = ing.path, ing.meta
-    cfg = apply_meta(cfg, meta)
+    cfg = effective_cfg(cfg, meta)
     vid, ws, out = _paths(video, cfg)
     _setup_logging(ws)
     sel = out / "selection.json"
-    words = cache.load(ws / "words.json", cache.key_of(v=WORDS_VERSION, vid=vid, model=cfg.whisper_model,
+    words = [] if cfg.profile == "visual" else cache.load(ws / "words.json", cache.key_of(v=WORDS_VERSION, vid=vid, model=cfg.whisper_model,
                        beam=cfg.whisper_beam, lang=cfg.language, compute=cfg.whisper_compute_type,
                        min_word=cfg.min_word_s))
     if not sel.exists() or words is None:
