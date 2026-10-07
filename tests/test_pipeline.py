@@ -163,3 +163,20 @@ def test_defaults_and_cli_warning_for_source_link_with_local_file(tmp_path, caps
     # passando o link no lugar do arquivo não há aviso
     cli.main(["run", "https://youtu.be/abc", "--workspace", str(tmp_path / "w")])
     assert "NÃO será baixado" not in capsys.readouterr().err
+
+
+@needs_ffmpeg
+def test_relative_workspace_and_output_dirs_work_with_link_input(tmp_path, monkeypatch):
+    """Regressão: com workspace/output relativos (o uso normal na CLI), o download voltava um caminho
+    relativo e o ffmpeg, que roda em outra pasta (cwd), não achava o vídeo."""
+    from pathlib import Path
+    from conftest import YT_INFO, make_fake_ydl
+    monkeypatch.chdir(tmp_path)
+    cfg = Config(min_clip_s=8, max_clip_s=20, clips_per_video=1, preset="ultrafast", text_mode="captions",
+                 workspace_dir=Path("workspace"), output_dir=Path("output"))
+    ydl = make_fake_ydl(YT_INFO, video_dur=60)
+    backend = FakeBackend([cand(0, 2, score=9, title="Primeiro")])
+    _, whisper, factory, _ = setup(tmp_path, cfg, backend)
+    review = pipeline.run_pipeline("https://youtu.be/IALW8WPhUQ4", cfg, transcriber=whisper,
+                                   client_factory=factory, ydl_cls=ydl)
+    assert len(list(review.parent.glob("*.mp4"))) == 1

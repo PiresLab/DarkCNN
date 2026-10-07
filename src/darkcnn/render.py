@@ -58,6 +58,7 @@ def render_key(src_id: str, clip: dict, words: list[dict], cfg: Config) -> str:
 def render_clip(src: Path, clip: dict, words: list[dict], cfg: Config, dest: Path, workdir: Path,
                 key: str) -> bool:
     """Renderiza `clip` em `dest`. Devolve False se já estava pronto (mesma chave)."""
+    src = Path(src).resolve()  # o ffmpeg roda com cwd=workdir: caminho relativo deixaria de existir
     keyfile = workdir / "render.key"
     if dest.exists() and keyfile.exists() and keyfile.read_text().strip() == key:
         return False

@@ -75,7 +75,8 @@ def _warn_js_runtime() -> None:
 
 
 def _download(url: str, cfg: Config, ydl_cls: Any) -> Ingested:
-    folder = cfg.workspace_dir / "downloads" / hashlib.sha1(url.encode()).hexdigest()[:12]
+    # caminho ABSOLUTO: o render roda o ffmpeg em outra pasta (cwd), onde um caminho relativo não existe
+    folder = (cfg.workspace_dir / "downloads" / hashlib.sha1(url.encode()).hexdigest()[:12]).resolve()
     meta_file = folder / "meta.json"
     cached = _find_video(folder)
     if cached and meta_file.exists():  # 2ª execução: sem rede, sem baixar
