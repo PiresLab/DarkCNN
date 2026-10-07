@@ -12,15 +12,9 @@ import statistics
 
 from pathlib import Path
 
-from .media import run
+from .media import has_audio, run  # noqa: F401  (has_audio reexportado: mora em media.py)
 
 Shot = dict  # {"id", "start", "end", "text", "loud"}  (loud = dB relativo à mediana; None sem áudio)
-
-
-def has_audio(video: Path) -> bool:
-    p = run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
-             "-of", "csv=p=0", video])
-    return bool(p.stdout.strip())
 
 
 def detect_cuts(video: Path, threshold: float = 0.30) -> list[float]:

@@ -69,3 +69,35 @@ def test_ranked_has_theme_title_big_rank_badge_and_hook():
     assert "TOP 5 FINALIZAÇÕES" in d[0] and "Mata-leão" in d[1]
     assert d[2].startswith("Dialogue: 2,0:00:00.00,0:00:01.40") and "#3" in d[2]  # número grande só na entrada
     assert d[3].startswith("Dialogue: 1,0:00:00.00,0:00:10.00") and d[3].endswith("#3")  # selo fixo
+
+
+CHOICES = [{"a": "Nunca sentir dor", "b": "Nunca sentir medo", "start": 2.0, "end": 6.0, "countdown": 3.0}]
+
+
+def test_choice_events_show_both_options_then_the_countdown():
+    ev = T.choice_events(CHOICES)
+    styles = [l.split(",")[3] for l in ev]
+    assert styles == ["OptA", "OptB", "VS", "Timer", "Timer", "Timer"]  # 3 s de contagem = 3 números
+    assert "NUNCA SENTIR DOR" in ev[0] and "NUNCA SENTIR MEDO" in ev[1]
+    # as opções ficam da pergunta até o fim da contagem; o "OU" some quando a contagem começa
+    assert ev[0].startswith("Dialogue: 1,0:00:02.00,0:00:09.00")
+    assert ev[2].startswith("Dialogue: 1,0:00:02.00,0:00:06.00") and ev[2].rstrip().endswith("OU")
+    assert ev[3].startswith("Dialogue: 2,0:00:06.00,0:00:07.00") and ev[3].rstrip().endswith("3")
+    assert ev[5].rstrip().endswith("1") and ev[5].startswith("Dialogue: 2,0:00:08.00,0:00:09.00")
+
+
+def test_choice_events_without_countdown():
+    assert [l.split(",")[3] for l in T.choice_events([{**CHOICES[0], "countdown": 0.0}])] == \
+        ["OptA", "OptB", "VS"]
+
+
+def test_narration_ass_has_captions_and_choices_together():
+    words = [{"w": "você", "start": 2.1, "end": 2.4, "p": 1}, {"w": "prefere", "start": 2.4, "end": 2.9, "p": 1}]
+    ass = T.build_narration_ass(words, CHOICES, 10.0, Config())
+    styles = [l.split(",")[3] for l in ass.splitlines() if l.startswith("Dialogue")]
+    assert styles.count("Default") == 2 and "OptA" in styles and "Timer" in styles
+    assert "VOCÊ" in ass and "PREFERE" in ass
+    # sem legenda, as escolhas continuam aparecendo
+    sem = T.build_narration_ass(words, CHOICES, 10.0, Config(text_mode="none"))
+    assert "Default" not in [l.split(",")[3] for l in sem.splitlines() if l.startswith("Dialogue")]
+    assert "OptA" in sem

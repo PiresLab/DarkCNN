@@ -19,6 +19,18 @@ class WatermarkCfg(BaseModel):
     y: str = "120"  # acima do título (layout 'titled'), fora da zona de UI das plataformas
 
 
+class VoiceCfg(BaseModel):
+    """Uma voz do GPT-SoVITS: áudio de referência (3-10 s) + a transcrição exata dele."""
+    model_config = ConfigDict(extra="forbid")
+
+    ref_audio: Path  # WAV de referência; o caminho é lido pelo SERVIDOR do GPT-SoVITS
+    prompt_text: str = ""  # o que é falado no áudio de referência (melhora muito a imitação)
+    lang: str = "pt"  # idioma do texto e do áudio de referência
+    speed: float = Field(1.0, gt=0.1, le=3.0)
+    gpt_weights: Path | None = None  # modelos próprios dessa voz (opcional)
+    sovits_weights: Path | None = None
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -40,6 +52,24 @@ class Config(BaseModel):
     judge_max_candidates: int = Field(12, ge=2)  # teto de candidatos no vídeo que o juiz assiste
     judge_prompt_version: str = "judge_v1"
     theme: str | None = None  # modo compilado ("top 5 finalizações")
+
+    # --- narração sobre gameplay (comando `narrate`) ---
+    script_prompt_version: str = "script_v1"
+    narrate_format: str = "curiosidade"  # curiosidade | voce-prefere | e-se | texto livre
+    topic: str | None = None  # None = a IA escolhe o tema
+    count: int = Field(1, ge=1, le=10)  # quantos vídeos por execução
+    target_s: float = Field(45.0, gt=5)  # duração alvo da narração
+    voice: str = "default"  # nome de uma voz em `voices`
+    voices: dict[str, VoiceCfg] = {}
+    tts_backend: Literal["gptsovits"] = "gptsovits"
+    tts_url: str = "http://127.0.0.1:9880"
+    tts_timeout_s: float = 600.0  # síntese em CPU é lenta
+    tts_split_method: str = "cut5"  # como o GPT-SoVITS quebra o texto (ver text_segmentation_method.py)
+    gameplay_dir: Path | None = None  # pasta com as gameplays de fundo
+    game_volume: float = Field(0.06, ge=0.0, le=1.0)  # volume do áudio da gameplay (0 = mudo)
+    pause_s: float = Field(0.35, ge=0.0)  # silêncio entre as linhas do roteiro
+    countdown_s: float = Field(3.0, ge=0.0)  # tempo de decisão após uma pergunta "você prefere"
+    seed: int | None = None  # fixa a escolha da gameplay (reprodutível)
     theme_min_fit: int = Field(5, ge=1, le=10)  # abaixo disso o momento não combina com o tema e é descartado
 
     # --- perfil: talk = vídeo com fala (transcrição); visual = sem fala (planos + vídeo para o Gemini) ---

@@ -31,6 +31,12 @@ def probe_duration(path: Path) -> float:
     return float(p.stdout.strip())
 
 
+def has_audio(path: Path) -> bool:
+    p = run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+             "-of", "csv=p=0", path])
+    return bool(p.stdout.strip())
+
+
 def video_info(path: Path) -> dict:
     p = run(
         [

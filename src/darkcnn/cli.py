@@ -56,6 +56,34 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("--no-judge", dest="judge", action="store_const", const=False)
     cp.add_argument("--force", action="store_true", help="ignora o cache de análise")
 
+    nr = sub.add_parser("narrate", help="gera vídeos narrados por IA sobre uma gameplay de fundo")
+    nr.add_argument("--config", type=Path)
+    nr.add_argument("--format", dest="narrate_format",
+                    help="curiosidade | voce-prefere | e-se | ou descreva o formato que quiser")
+    nr.add_argument("--topic", help="tema (sem isso, a IA escolhe)")
+    nr.add_argument("--count", dest="count", type=int, help="quantos vídeos gerar (padrão 1)")
+    nr.add_argument("--target-s", dest="target_s", type=float, help="duração alvo da narração (padrão 45)")
+    nr.add_argument("--voice", help="nome de uma voz do config.yaml")
+    nr.add_argument("--gameplay-dir", dest="gameplay_dir", type=Path, help="pasta com os vídeos de fundo")
+    nr.add_argument("--game-volume", dest="game_volume", type=float, help="volume da gameplay (0 = mudo)")
+    nr.add_argument("--seed", type=int, help="fixa o sorteio da gameplay")
+    nr.add_argument("--layout", choices=["crop", "blur"])
+    nr.add_argument("--text-mode", dest="text_mode", choices=["captions", "none"])
+    nr.add_argument("--watermark", dest="watermark_path", type=Path)
+    nr.add_argument("--model", dest="gemini_model")
+    nr.add_argument("--thinking-level", dest="thinking_level", choices=["off", "low", "medium", "high"])
+    nr.add_argument("--preset")
+    nr.add_argument("--workspace", dest="workspace_dir", type=Path)
+    nr.add_argument("--output", dest="output_dir", type=Path)
+    nr.add_argument("--force", action="store_true", help="ignora o cache de roteiro")
+
+    vc = sub.add_parser("voices", help="lista as vozes do config e testa uma frase (não usa o Gemini)")
+    vc.add_argument("--config", type=Path)
+    vc.add_argument("--say", help="frase de teste para sintetizar")
+    vc.add_argument("--voice", help="qual voz testar")
+    vc.add_argument("--output", dest="output_dir", type=Path)
+    vc.add_argument("--workspace", dest="workspace_dir", type=Path)
+
     sh = sub.add_parser("shots", help="diagnóstico do perfil visual: planos e volume (não usa o Gemini)")
     common(sh)
 
@@ -68,9 +96,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_dotenv()
-    overrides = {k: v for k, v in vars(args).items() if k not in ("cmd", "input", "config", "force")}
+    overrides = {k: v for k, v in vars(args).items()
+                 if k not in ("cmd", "input", "config", "force", "say")}
     cfg = load_config(args.config, overrides)
-    if not is_url(args.input) and args.source and is_url(args.source):
+    if getattr(args, "input", None) and not is_url(args.input) and getattr(args, "source", None) \
+            and is_url(args.source):
         print(f"AVISO: --source só rotula a fonte; o link NÃO será baixado e o arquivo local "
               f"'{args.input}' é que será processado. Para baixar o link, rode: darkcnn {args.cmd} \"{args.source}\"",
               file=sys.stderr)
@@ -78,6 +108,15 @@ def main(argv: list[str] | None = None) -> int:
     from .pipeline import render_from_selection, run_compile, run_pipeline, shots_report
 
     try:
+        if args.cmd == "narrate":
+            from .narrate import run_narrate
+            review = run_narrate(cfg, force=args.force)
+            print(f"\nPronto. Revise: {review}")
+            return 0
+        if args.cmd == "voices":
+            from .voices import voices_report
+            print("\n" + voices_report(cfg, args.say))
+            return 0
         if args.cmd == "shots":
             print("\n" + shots_report(args.input, cfg))
             return 0

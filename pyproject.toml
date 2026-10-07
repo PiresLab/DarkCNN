@@ -14,6 +14,7 @@ dependencies = [
     "faster-whisper",
     "numpy",
     "yt-dlp>=2025.11.12",
+    "requests",
 ]
 
 [project.optional-dependencies]

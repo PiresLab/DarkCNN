@@ -109,3 +109,48 @@ def write_review(out_dir: Path, video: Path, cfg: Config, clips: list[dict], rej
     p = out_dir / "review.md"
     p.write_text("\n".join(L), encoding="utf-8")
     return p
+
+
+NARRATION_WARNINGS = [
+    "voz clonada de personagem: personagens e dubladores têm direitos próprios; usar isso num canal "
+    "monetizado tem risco real de reclamação. Confira antes de postar",
+    "narração gerada por IA sobre gameplay em série é o caso que as plataformas tratam como conteúdo "
+    "em massa: varie formato, voz e tema, e acrescente algo seu",
+    "o roteiro é escrito por IA e pode conter erro de fato: confira os dados antes de publicar",
+]
+
+
+def write_narration_review(out_dir: Path, cfg: Config, videos: list[dict]) -> Path:
+    """review.md do comando `narrate`: roteiro completo, voz, gameplay usada e os avisos de risco."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    L = [
+        f"# Revisão — narração sobre gameplay ({cfg.narrate_format})", "",
+        f"- **Vídeos:** {len(videos)} — **Voz:** {cfg.voice} — **Modelo:** {cfg.gemini_model}",
+        f"- **Tema:** {cfg.topic or 'escolhido pela IA'} — **Alvo de duração:** {cfg.target_s:.0f}s",
+        f"- **Texto na tela:** {cfg.text_mode} — **Layout:** {cfg.layout} — "
+        f"**Volume da gameplay:** {cfg.game_volume:.0%}",
+        "", "> ⚠ **Antes de postar:** " + "; ".join(NARRATION_WARNINGS) + ".",
+        "", "| # | Duração | Título | Tema | Gameplay |", "|---|---|---|---|---|",
+    ]
+    for v in videos:
+        L.append(f"| {v['rank']} | {v['duration']:.0f}s | {v['title']} | {v['topic']} | "
+                 f"{Path(v['gameplay']).name} |")
+    for v in videos:
+        L += ["", f"## {v['rank']}. {v['title']}", "",
+              f"- **Arquivo:** `{v['file']}` — {v['duration']:.0f}s",
+              f"- **Tema:** {v['topic']}",
+              f"- **Gameplay:** `{Path(v['gameplay']).name}` a partir de {fmt_ts(v['gameplay_start'])}"
+              + (" (repetindo)" if v.get("gameplay_loop") else ""),
+              "", "**Roteiro falado:**", ""]
+        for ln in v["lines"]:
+            mark = f"**[{ln['option_a']} × {ln['option_b']}]** " if ln["kind"] == "escolha" else ""
+            L.append(f"- `{fmt_ts(ln['start'])}` {mark}{ln['text']}")
+        if v.get("match", 1) < 0.5:
+            L.append("")
+            L.append("- ⚠ O Whisper reconheceu pouco desta narração: confira se a legenda está em sincronia.")
+    L += ["", "---",
+          "Para mudar um roteiro, edite `scripts.json` e rode `darkcnn narrate` de novo: só o que mudou "
+          "é sintetizado e renderizado.", ""]
+    p = out_dir / "review.md"
+    p.write_text("\n".join(L), encoding="utf-8")
+    return p

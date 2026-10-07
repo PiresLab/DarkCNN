@@ -44,6 +44,7 @@ com link `&t=` no YouTube), `selection.json` (editável) e `rejected.json` (cand
 | `--text-mode titled` | **título no topo + frase-gancho embaixo**, sem legenda de fala (padrão do `--profile visual`) |
 | `--text-mode none` | sem texto |
 | `compile --theme "…"` | monta um compilado "Top N" num vídeo só (veja a seção acima) |
+| `narrate --format …` | gera vídeos narrados por IA sobre gameplay (veja a seção acima) |
 | `--profile talk` / `visual` | vídeo com fala (padrão) / sem fala: escolhe olhando o vídeo |
 | `--layout blur` / `crop` | vídeo inteiro sobre fundo desfocado (padrão) / corte central 9:16 |
 | `--watermark logo.png` | PNG com alpha (posição e opacidade no `config.yaml`) |
@@ -71,6 +72,49 @@ da fonte, que vale para todos os trechos. Passa de 3 min? Ele avisa (limite do Y
 
 **Mudar a ordem ou os limites:** edite `rank`, `start`, `end` ou `title` no `selection.json` (o `rank` define a posição) e rode
 `python -m darkcnn render "<link>" --theme "top 5 finalizações"`: só os trechos alterados são renderizados de novo.
+
+## Vídeos narrados sobre gameplay (`narrate`)
+Sem vídeo-fonte: a IA escreve o roteiro, uma voz narra e o texto aparece como legenda sobre uma gameplay
+aleatória da sua pasta.
+```powershell
+python -m darkcnn voices --say "testando a voz"        # 1) confira a voz antes de gastar um roteiro
+python -m darkcnn narrate --format curiosidade --count 3 --voice gumball --gameplay-dir gameplays\
+python -m darkcnn narrate --format voce-prefere --count 2
+```
+Sai `output\narrate\<id>\01_titulo.mp4` + `review.md` com o roteiro falado, o tema e a gameplay usada.
+
+| Formato | O que é |
+|---|---|
+| `curiosidade` | um fato surpreendente e verdadeiro, explicado do choque para a causa |
+| `voce-prefere` | dilemas com **duas opções na tela e contagem regressiva** para o espectador decidir |
+| `e-se` | hipótese absurda levada a sério (ex.: um humano de hoje na época dos dinossauros) |
+| qualquer texto | `--format "mitos desmentidos"` vira instrução direta para a IA |
+
+Sem `--topic`, a IA escolhe o tema. Outras opções: `--count` (quantos vídeos), `--target-s` (duração alvo),
+`--game-volume` (padrão 6%), `--seed` (fixa o sorteio da gameplay), `--layout`, `--watermark`, `--model`.
+
+**Como os tempos da legenda são exatos:** a voz é sintetizada linha por linha, o Whisper ouve a narração e o
+código casa o que ele ouviu com o texto **que sabemos que foi falado**. Assim a legenda mostra o roteiro
+(sem erro de audição) com o tempo real de cada palavra. Se o Whisper reconhecer pouco, o `review.md` avisa.
+
+**Cache:** roteiro e voz ficam em `workspace\narrate\<id>\`. Mudar uma linha re-sintetiza **só ela** —
+importante porque a síntese em CPU é lenta. Rodar o mesmo comando de novo não gasta nada.
+
+### Instalar o GPT-SoVITS (as vozes)
+O DarkCNN fala com o GPT-SoVITS pela API dele; ele roda em separado:
+```powershell
+# na pasta do GPT-SoVITS, depois de instalado:
+python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml
+```
+Para cada voz você precisa de um **áudio de referência de 3 a 10 segundos** e da transcrição exata dele,
+declarados em `voices:` no `config.yaml` (veja o `config.example.yaml`). O caminho do áudio é lido pela
+máquina onde o **servidor** roda. Sem GPU a síntese é lenta: o `darkcnn voices --say` mede e estima quanto
+tempo levaria uma narração inteira.
+
+> **Antes de publicar:** personagens famosos e seus dubladores têm direitos próprios, e clonar essas vozes
+> num canal monetizado tem risco real de reclamação. Narração de IA sobre gameplay feita em série também é
+> o caso que as plataformas tratam como conteúdo em massa. O `review.md` repete esses avisos, e o roteiro é
+> escrito por IA: confira os fatos antes de postar.
 
 ## Como a IA escolhe os cortes (e como melhorar)
 A escolha tem **duas passadas**:

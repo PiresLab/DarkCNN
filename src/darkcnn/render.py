@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import cache, textlayers
 from .config import Config
-from .media import run
+from .media import has_audio, run
 
 log = logging.getLogger(__name__)
 
@@ -96,5 +96,72 @@ def render_clip(src: Path, clip: dict, words: list[dict], cfg: Config, dest: Pat
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.unlink(missing_ok=True)  # no Windows, mover sobre arquivo existente falha
     shutil.move(str(tmp), dest)
+    keyfile.write_text(key)
+    return True
+
+
+def narration_key(gameplay: Path, offset: float, loop: bool, words: list[dict], choices: list[dict],
+                  dur: float, cfg: Config) -> str:
+    wm = cfg.watermark.path
+    wm_sig = [str(wm), wm.stat().st_size, int(wm.stat().st_mtime)] if wm and wm.exists() else None
+    return cache.key_of(
+        v=1, game=str(gameplay), offset=round(offset, 3), loop=loop, dur=round(dur, 3),
+        words=words, choices=choices, text_mode=cfg.text_mode, layout=cfg.layout, font=cfg.font,
+        preset=cfg.preset, crf=cfg.crf, game_volume=cfg.game_volume, wm=wm_sig,
+        wm_cfg=cfg.watermark.model_dump(mode="json", exclude={"path"}),
+    )
+
+
+def render_narration(gameplay: Path, offset: float, loop: bool, voice_wav: Path, words: list[dict],
+                     choices: list[dict], dur: float, cfg: Config, dest: Path, workdir: Path,
+                     key: str) -> bool:
+    """Gameplay de fundo + voz + legenda (+ escolhas) + marca d'água, num único encode.
+    Devolve False se o vídeo já estava pronto com a mesma configuração."""
+    gameplay, voice_wav = Path(gameplay).resolve(), Path(voice_wav).resolve()
+    keyfile = workdir / "render.key"
+    if dest.exists() and keyfile.exists() and keyfile.read_text().strip() == key:
+        return False
+
+    shutil.rmtree(workdir, ignore_errors=True)
+    workdir.mkdir(parents=True, exist_ok=True)
+    (workdir / "subs.ass").write_text(textlayers.build_narration_ass(words, choices, dur, cfg),
+                                      encoding="utf-8")
+    has_fonts = bool(cfg.fonts_dir and Path(cfg.fonts_dir).is_dir())
+    if has_fonts:
+        shutil.copytree(cfg.fonts_dir, workdir / "fonts")
+    wm = cfg.watermark.path
+    has_wm = wm is not None
+    if has_wm:
+        if not wm.exists():
+            raise FileNotFoundError(f"marca d'água não encontrada: {wm}")
+        shutil.copyfile(wm, workdir / "wm.png")
+
+    mix = cfg.game_volume > 0 and has_audio(gameplay)
+    parts = [video_chain(cfg.layout), "[v0]ass=subs.ass" + (":fontsdir=fonts" if has_fonts else "") + "[v1]"]
+    last = "v1"
+    if has_wm:
+        w = cfg.watermark
+        parts.append(f"[2:v]format=rgba,colorchannelmixer=aa={w.opacity:.2f}[wm]")
+        parts.append(f"[{last}][wm]overlay={w.x}:{w.y}[v]")
+        last = "v"
+    if mix:  # normalize=0: sem isso o amix derruba o volume da voz pela metade
+        parts.append(f"[0:a]volume={cfg.game_volume:.3f}[g]")
+        parts.append("[g][1:a]amix=inputs=2:duration=longest:normalize=0[a]")
+
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    if loop:  # gameplay mais curta que a narração: repete
+        cmd += ["-stream_loop", "-1"]
+    cmd += ["-ss", f"{offset:.3f}", "-t", f"{dur:.3f}", "-i", str(gameplay), "-i", str(voice_wav)]
+    if has_wm:
+        cmd += ["-i", "wm.png"]
+    cmd += [
+        "-filter_complex", ";".join(parts), "-map", f"[{last}]", "-map", "[a]" if mix else "1:a",
+        "-t", f"{dur:.3f}", "-c:v", "libx264", "-crf", str(cfg.crf), "-preset", cfg.preset,
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "out.mp4",
+    ]
+    run(cmd, cwd=workdir)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.unlink(missing_ok=True)
+    shutil.move(str(workdir / "out.mp4"), dest)
     keyfile.write_text(key)
     return True

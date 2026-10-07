@@ -37,3 +37,18 @@ watermark:
 
 # --- compilado (python -m darkcnn compile LINK --theme "top 5 finalizações") ---
 # theme_min_fit: 5                    # momentos com encaixe no tema abaixo disso são descartados
+
+# --- narração sobre gameplay (python -m darkcnn narrate) ---
+# voice: gumball
+# gameplay_dir: gameplays/            # pasta com os vídeos de fundo
+# game_volume: 0.06                   # volume do áudio da gameplay (0 = mudo)
+# target_s: 45                        # duração alvo da narração
+# countdown_s: 3                      # tempo de decisão no formato "você prefere"
+# pause_s: 0.35                       # silêncio entre as linhas do roteiro
+# tts_url: http://127.0.0.1:9880      # servidor do GPT-SoVITS
+# voices:
+#   gumball:
+#     ref_audio: C:/vozes/gumball.wav # 3-10 s; caminho lido pelo SERVIDOR do GPT-SoVITS
+#     prompt_text: "exatamente o que é falado nesse áudio"
+#     lang: pt
+#     speed: 1.0
