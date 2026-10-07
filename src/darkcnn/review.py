@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -22,8 +23,21 @@ def source_link(source: str | None, t: float) -> str | None:
     return urlunparse(u._replace(query=urlencode(q)))
 
 
+def license_warnings(lic: str | None) -> list[str]:
+    """Avisos sobre a licença informada/detectada (não é parecer jurídico)."""
+    l = (lic or "").lower()
+    out = []
+    if "padrão do youtube" in l:
+        out.append("licença padrão do YouTube: reutilizar o vídeo exige permissão do canal")
+    if re.search(r"-nd\b|noderiv|no derivat|sem derivad", l):
+        out.append("licença com ND (sem obras derivadas): editar/cortar o vídeo não é permitido")
+    if re.search(r"-nc\b|noncommercial|non-commercial|não comercial|nao comercial", l):
+        out.append("licença com NC (não comercial): não serve para canal monetizado")
+    return out
+
+
 def write_review(out_dir: Path, video: Path, cfg: Config, clips: list[dict], rejected: list[dict],
-                 info: dict) -> Path:
+                 info: dict, meta: dict | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "selection.json").write_text(json.dumps(clips, ensure_ascii=False, indent=2), encoding="utf-8")
     (out_dir / "rejected.json").write_text(json.dumps(rejected, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -33,8 +47,10 @@ def write_review(out_dir: Path, video: Path, cfg: Config, clips: list[dict], rej
         warn.append("fonte não informada (`--source`)")
     if not cfg.license:
         warn.append("licença/permissão não informada (`--license`)")
+    warn += license_warnings(cfg.license)
     L = [
         f"# Revisão — {video.name}", "",
+        *([f"- **Vídeo original:** {meta.get('title')} — canal {meta.get('channel')}"] if meta else []),
         f"- **Fonte:** {cfg.source or '⚠ não informada'}",
         f"- **Licença/permissão:** {cfg.license or '⚠ não informada'}",
         f"- **Duração do vídeo:** {fmt_ts(info['duration'])} — **Cortes:** {len(clips)} "

@@ -80,3 +80,34 @@ def make_watermark(path: Path) -> Path:
         check=True,
     )
     return path
+
+
+def make_fake_ydl(info: dict, video_dur: float = 60):
+    """Classe com a interface mínima do yt_dlp.YoutubeDL; `download` grava um vídeo sintético em outtmpl."""
+
+    class FakeYDL:
+        instances = 0
+        downloads = 0
+
+        def __init__(self, opts):
+            type(self).instances += 1
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download=False):
+            return dict(info) if info is not None else None
+
+        def download(self, urls):
+            type(self).downloads += 1
+            make_video(Path(self.opts["outtmpl"].replace("%(ext)s", "mp4")), dur=video_dur)
+
+    return FakeYDL
+
+
+YT_INFO = {"id": "IALW8WPhUQ4", "title": "Papo sobre a vida", "channel": "Canal Teste", "duration": 60,
+           "webpage_url": "https://www.youtube.com/watch?v=IALW8WPhUQ4", "license": None}

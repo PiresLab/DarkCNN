@@ -13,7 +13,7 @@ whisper_model: small                  # small ≈ 16 min por hora de vídeo num 
 
 # --- aparência ---
 text_mode: captions                   # captions = legenda por palavra | titled = título no topo + gancho embaixo | none
-layout: crop                          # crop = corte central | blur = vídeo inteiro sobre fundo desfocado
+layout: blur                          # blur = vídeo inteiro sobre fundo desfocado | crop = corte central
 # font: Arial
 # fonts_dir: assets/fonts             # pasta com .ttf/.otf (opcional)
 preset: medium                        # x264: use veryfast para testar mais rápido

@@ -13,6 +13,7 @@ dependencies = [
     "pyyaml",
     "faster-whisper",
     "numpy",
+    "yt-dlp>=2025.11.12",
 ]
 
 [project.optional-dependencies]

@@ -6,11 +6,12 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from . import analyze, cache, media, render, review
 from .config import Config
 from .gemini import GenaiBackend, GeminiClient, GeminiError
+from .ingest import apply_meta, resolve_input
 from .transcribe import Transcriber, normalize_words, split_sentences, transcribe_words
 
 log = logging.getLogger(__name__)
@@ -31,17 +32,23 @@ def make_client(cfg: Config) -> GeminiClient:
     )
 
 
-def _setup_logging(ws: Path) -> None:
-    ws.mkdir(parents=True, exist_ok=True)
+def _setup_logging(ws: Path | None = None) -> None:
+    """Console sempre; run.log na pasta do vídeo quando `ws` é conhecido."""
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     for h in list(root.handlers):
         if getattr(h, "_darkcnn", False):
             root.removeHandler(h)
-    for h in (logging.StreamHandler(), logging.FileHandler(ws / "run.log", encoding="utf-8")):
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if ws is not None:
+        ws.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(ws / "run.log", encoding="utf-8"))
+    for h in handlers:
         h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
         h._darkcnn = True  # type: ignore[attr-defined]
         root.addHandler(h)
+    for noisy in ("httpx", "httpcore", "huggingface_hub", "google_genai", "urllib3", "faster_whisper"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def step_words(video: Path, vid: str, ws: Path, cfg: Config, transcriber: Transcriber, force: bool) -> list[dict]:
@@ -102,13 +109,19 @@ def _paths(video: Path, cfg: Config) -> tuple[str, Path, Path]:
     return vid, cfg.workspace_dir / vid, cfg.output_dir / vid
 
 
-def run_pipeline(video: Path, cfg: Config, *, transcriber: Transcriber = transcribe_words,
-                 client_factory: Callable[[], GeminiClient] | None = None, force: bool = False) -> Path:
-    video = video.resolve()
+def run_pipeline(input_arg: str | Path, cfg: Config, *, transcriber: Transcriber = transcribe_words,
+                 client_factory: Callable[[], GeminiClient] | None = None, force: bool = False,
+                 ydl_cls: Any = None) -> Path:
+    _setup_logging()
+    ing = resolve_input(str(input_arg), cfg, ydl_cls)  # arquivo local ou download do link
+    video, meta = ing.path, ing.meta
+    cfg = apply_meta(cfg, meta)
     vid, ws, out = _paths(video, cfg)
     _setup_logging(ws)
     info = media.video_info(video)
     log.info("vídeo %s (%.1f min) -> id %s", video.name, info["duration"] / 60, vid)
+    log.info("config: layout=%s texto=%s modelo=%s cortes=%d (%.0f-%.0fs)", cfg.layout, cfg.text_mode,
+             cfg.gemini_model, cfg.clips_per_video, cfg.min_clip_s, cfg.max_clip_s)
     if info["duration"] / 60 > cfg.max_single_window_min:
         log.warning("vídeo > %.0f min: a análise em janelas só chega na Fase 3; a qualidade pode cair",
                     cfg.max_single_window_min)
@@ -124,12 +137,15 @@ def run_pipeline(video: Path, cfg: Config, *, transcriber: Transcriber = transcr
         log.warning("nenhum corte válido; veja rejected.json (ajuste min/max ou rode com --force)")
     out.mkdir(parents=True, exist_ok=True)
     step_render(video, vid, ws, out, clips, words, cfg)
-    return review.write_review(out, video, cfg, clips, rejected, info)
+    return review.write_review(out, video, cfg, clips, rejected, info, meta)
 
 
-def render_from_selection(video: Path, cfg: Config) -> Path:
+def render_from_selection(input_arg: str | Path, cfg: Config, ydl_cls: Any = None) -> Path:
     """Re-renderiza a partir do selection.json editado (início/fim/título/gancho), sem Whisper nem Gemini."""
-    video = video.resolve()
+    _setup_logging()
+    ing = resolve_input(str(input_arg), cfg, ydl_cls)
+    video, meta = ing.path, ing.meta
+    cfg = apply_meta(cfg, meta)
     vid, ws, out = _paths(video, cfg)
     _setup_logging(ws)
     sel = out / "selection.json"
@@ -143,4 +159,4 @@ def render_from_selection(video: Path, cfg: Config) -> Path:
         c["duration"] = round(c["end"] - c["start"], 3)
     rejected = json.loads((out / "rejected.json").read_text(encoding="utf-8")) if (out / "rejected.json").exists() else []
     step_render(video, vid, ws, out, clips, words, cfg)
-    return review.write_review(out, video, cfg, clips, rejected, media.video_info(video))
+    return review.write_review(out, video, cfg, clips, rejected, media.video_info(video), meta)

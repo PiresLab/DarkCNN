@@ -15,6 +15,7 @@ termina em limite de frase. Detalhes e números medidos: [`docs/fase0-resultados
 ## Instalação (Windows, PowerShell)
 ```powershell
 winget install Gyan.FFmpeg                    # FFmpeg "full" (precisa de libass); reabra o terminal
+winget install DenoLand.Deno                  # runtime JS que o yt-dlp pede para baixar do YouTube em qualidade total
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e .                              # instala o darkcnn e as dependências
@@ -25,8 +26,14 @@ Confira o ambiente: `python spikes\00_check_env.py`.
 
 ## Uso
 ```powershell
-python -m darkcnn run video.mp4 --source "https://www.youtube.com/watch?v=XXXX" --license "CC-BY 4.0"
+# link (baixa com yt-dlp; título, canal e licença do vídeo vão para o review.md)
+python -m darkcnn run "https://youtu.be/XXXX"
+# arquivo local (use --source/--license só para rotular a procedência)
+python -m darkcnn run video.mp4 --source "https://youtu.be/XXXX" --license "CC-BY 4.0"
 ```
+> `--source` **não baixa nada**: é só um rótulo para o `review.md`. Para baixar um link, passe o link no lugar do arquivo.
+> Vídeos baixados ficam em `workspace\downloads\`; rodar de novo com o mesmo link não baixa outra vez.
+
 Saída em `output\<video>\`: `01_titulo.mp4`, `02_…`, `review.md` (título, gancho, motivo, notas, tempo na fonte
 com link `&t=` no YouTube), `selection.json` (editável) e `rejected.json` (candidatos descartados e o motivo).
 
@@ -35,7 +42,7 @@ com link `&t=` no YouTube), `selection.json` (editável) e `rejected.json` (cand
 | `--text-mode captions` | legenda por palavra, palavra falada em amarelo (padrão) |
 | `--text-mode titled` | **título no topo + frase-gancho embaixo**, sem legenda de fala (nocautes, vídeos satisfatórios) |
 | `--text-mode none` | sem texto |
-| `--layout crop` / `blur` | corte central 9:16 / vídeo inteiro sobre fundo desfocado |
+| `--layout blur` / `crop` | vídeo inteiro sobre fundo desfocado (padrão) / corte central 9:16 |
 | `--watermark logo.png` | PNG com alpha (posição e opacidade no `config.yaml`) |
 | `--clips 5 --min 30 --max 60` | quantidade e duração dos cortes |
 | `--model ID` | modelo Gemini (veja os IDs com `python spikes\03_gemini_probe.py --list-models`) |
@@ -50,14 +57,15 @@ chamadas ao Gemini e não renderiza de novo o que não mudou. O uso diário da A
 e há uma trava (`daily_request_budget`) contra estourar a cota.
 
 ## Limites conhecidos (Fase 1)
-- Só arquivo local e vídeos com fala. Link do YouTube (yt-dlp) e vídeos **sem fala** (nocautes, satisfatórios)
-  entram na Fase 2.
+- A seleção ainda depende da **fala** (transcrição). Vídeos **sem fala** (nocautes, satisfatórios) entram na
+  Fase 2: hoje o modo `--text-mode titled` já coloca título e gancho, mas a escolha dos trechos precisa de áudio falado.
 - Uma única chamada de análise por vídeo: acima de ~40 min a qualidade pode cair (janelas na Fase 3).
-- Crop central e fundo desfocado; rastreio de rosto fica para a Fase 3.
+- Rastreio de rosto fica para a Fase 3. Se o YouTube mudar e o download falhar: `pip install -U yt-dlp`.
 
 ## Direitos autorais e plataformas
-O pipeline não decide se você pode usar um vídeo. Preencha sempre `--source` e `--license`: o `review.md`
-avisa quando faltam. Licenças CC-BY-ND (sem derivados) e CC-BY-NC (sem uso comercial) não servem para um canal
+O pipeline não decide se você pode usar um vídeo. Ao baixar um link, ele registra a licença que o YouTube informa
+(Creative Commons ou "licença padrão") e o `review.md` avisa quando é a licença padrão, que exige permissão do canal.
+Com arquivo local, preencha `--source` e `--license`. Licenças CC-BY-ND (sem derivados) e CC-BY-NC (sem uso comercial) não servem para um canal
 monetizado. Reeditar o vídeo de outra pessoa só com título e frase na tela, sem comentário ou transformação, é o
 caso que o YouTube trata como *reused content* e que sistemas como o Content ID mais reivindicam; acrescente valor
 real (narração, comentário, edição própria) e prefira fontes com permissão.

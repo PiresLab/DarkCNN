@@ -11,7 +11,7 @@ WORDS = make_words(3, sent_s=3.0, words_per=3)
 
 
 def test_filter_graph_variants(tmp_path):
-    base = Config()
+    base = Config(layout="crop")
     fc, last = render.build_filter(base, has_ass=False, has_fonts=False, has_wm=False)
     assert last == "v0" and "crop=" in fc and "ass=" not in fc and "overlay=" not in fc
     fc, last = render.build_filter(Config(layout="blur"), True, True, True)
@@ -22,7 +22,7 @@ def test_filter_graph_variants(tmp_path):
 
 
 def test_render_key_depends_on_what_matters(tmp_path):
-    cfg = Config(text_mode="captions")
+    cfg = Config(text_mode="captions", layout="crop")
     k = render.render_key("vid", CLIP, WORDS, cfg)
     assert k == render.render_key("vid", dict(CLIP), WORDS, cfg)
     assert k != render.render_key("vid", {**CLIP, "start": 3.5}, WORDS, cfg)

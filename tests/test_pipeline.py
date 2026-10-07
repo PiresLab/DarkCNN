@@ -120,5 +120,46 @@ def test_cli_overrides_map_to_config():
                                    "--watermark", "wm.png", "--text-mode", "titled", "--layout", "blur"])
     assert (a.clips_per_video, a.min_clip_s, a.max_clip_s, a.text_mode, a.layout) == (2, 10.0, 25.0, "titled", "blur")
     from darkcnn.config import load_config
-    cfg = load_config(None, {k: v for k, v in vars(a).items() if k not in ("cmd", "video", "config", "force")})
+    cfg = load_config(None, {k: v for k, v in vars(a).items() if k not in ("cmd", "input", "config", "force")})
     assert cfg.watermark.path.name == "wm.png" and cfg.clips_per_video == 2
+
+
+@needs_ffmpeg
+def test_link_input_downloads_labels_review_and_caches(tmp_path, cfg):
+    from conftest import YT_INFO, make_fake_ydl
+    cfg = cfg.model_copy(update={"text_mode": "none"})
+    ydl = make_fake_ydl(YT_INFO, video_dur=60)
+    backend = FakeBackend([cand(0, 2, score=9, title="Primeiro")])
+    _, whisper, factory, calls = setup(tmp_path, cfg, backend)
+    url = "https://youtu.be/IALW8WPhUQ4?si=abc"
+
+    review = pipeline.run_pipeline(url, cfg, transcriber=whisper, client_factory=factory, ydl_cls=ydl)
+    text = review.read_text(encoding="utf-8")
+    assert "Papo sobre a vida" in text and "Canal Teste" in text  # título/canal originais
+    assert "watch?v=IALW8WPhUQ4" in text and "&t=" in text  # fonte vinda do yt-dlp + link com tempo
+    assert "padrão do YouTube" in text and "exige permissão do canal" in text  # licença não-CC avisada
+    assert ydl.downloads == 1 and backend.calls == 1
+
+    # 2ª execução com o mesmo link: não baixa, não transcreve, não chama o Gemini
+    pipeline.run_pipeline(url, cfg, transcriber=whisper, client_factory=factory, ydl_cls=ydl)
+    assert ydl.downloads == 1 and ydl.instances == 1 and backend.calls == 1 and calls["whisper"] == 1
+
+    # `render` também aceita o link e reaproveita o download
+    pipeline.render_from_selection(url, cfg, ydl_cls=ydl)
+    assert ydl.downloads == 1
+
+
+def test_defaults_and_cli_warning_for_source_link_with_local_file(tmp_path, capsys, monkeypatch):
+    assert Config().layout == "blur"  # padrão pedido pelo usuário
+    from darkcnn import cli, pipeline as pl
+    f = tmp_path / "video.mp4"
+    f.write_bytes(b"x")
+    seen = {}
+    monkeypatch.setattr(pl, "run_pipeline", lambda inp, cfg, force=False: seen.update(inp=inp, layout=cfg.layout) or tmp_path / "r.md")
+    assert cli.main(["run", str(f), "--source", "https://youtu.be/abc", "--workspace", str(tmp_path / "w")]) == 0
+    err = capsys.readouterr().err
+    assert "NÃO será baixado" in err and "darkcnn run" in err
+    assert seen == {"inp": str(f), "layout": "blur"}
+    # passando o link no lugar do arquivo não há aviso
+    cli.main(["run", "https://youtu.be/abc", "--workspace", str(tmp_path / "w")])
+    assert "NÃO será baixado" not in capsys.readouterr().err

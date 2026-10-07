@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .config import load_config, load_dotenv
+from .ingest import is_url
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -13,13 +14,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument("video", type=Path, help="arquivo de vídeo local")
+        sp.add_argument("input", metavar="VIDEO_OU_LINK", help="arquivo de vídeo local OU link http(s) (baixado com yt-dlp)")
         sp.add_argument("--config", type=Path, help="config.yaml (padrão: ./config.yaml se existir)")
         sp.add_argument("--text-mode", dest="text_mode", choices=["captions", "titled", "none"],
                         help="captions = legenda por palavra; titled = título no topo + gancho embaixo")
         sp.add_argument("--layout", choices=["crop", "blur"], help="crop central ou vídeo inteiro sobre fundo desfocado")
         sp.add_argument("--watermark", dest="watermark_path", type=Path, help="PNG com alpha")
-        sp.add_argument("--source", help="URL/descrição da fonte (vai para o review.md)")
+        sp.add_argument("--source", help="rótulo da fonte para o review.md (NÃO baixa nada; para baixar um link, passe-o no lugar do arquivo)")
         sp.add_argument("--license", help="licença ou permissão (vai para o review.md)")
         sp.add_argument("--preset", help="preset do x264 (medium, veryfast…)")
         sp.add_argument("--whisper-model", dest="whisper_model", help="tiny/base/small/medium…")
@@ -42,16 +43,20 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_dotenv()
-    overrides = {k: v for k, v in vars(args).items() if k not in ("cmd", "video", "config", "force")}
+    overrides = {k: v for k, v in vars(args).items() if k not in ("cmd", "input", "config", "force")}
     cfg = load_config(args.config, overrides)
+    if not is_url(args.input) and args.source and is_url(args.source):
+        print(f"AVISO: --source só rotula a fonte; o link NÃO será baixado e o arquivo local "
+              f"'{args.input}' é que será processado. Para baixar o link, rode: darkcnn {args.cmd} \"{args.source}\"",
+              file=sys.stderr)
 
     from .pipeline import render_from_selection, run_pipeline
 
     try:
         if args.cmd == "run":
-            review = run_pipeline(args.video, cfg, force=args.force)
+            review = run_pipeline(args.input, cfg, force=args.force)
         else:
-            review = render_from_selection(args.video, cfg)
+            review = render_from_selection(args.input, cfg)
     except Exception as e:  # mensagem curta para o usuário; o traceback fica no run.log
         print(f"\nERRO: {e}", file=sys.stderr)
         return 1

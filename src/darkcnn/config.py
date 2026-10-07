@@ -36,6 +36,7 @@ class Config(BaseModel):
     pad_start_s: float = 0.15
     pad_end_s: float = 0.30
     max_single_window_min: float = 40.0  # acima disso avisa (chunking só na Fase 3)
+    max_download_min: float = 180.0  # recusa baixar vídeos maiores que isso
 
     # --- transcrição ---
     language: str = "pt"
@@ -46,7 +47,7 @@ class Config(BaseModel):
 
     # --- vídeo/texto na tela ---
     text_mode: Literal["captions", "titled", "none"] = "captions"
-    layout: Literal["crop", "blur"] = "crop"
+    layout: Literal["crop", "blur"] = "blur"
     font: str = "Arial" if os.name == "nt" else "DejaVu Sans"
     fonts_dir: Path | None = None
     preset: str = "medium"

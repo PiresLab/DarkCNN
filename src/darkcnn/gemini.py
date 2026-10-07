@@ -54,7 +54,8 @@ class GenaiBackend:
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    response_mime_type="application/json", response_schema=schema, temperature=temperature
+                    response_mime_type="application/json", response_schema=schema, temperature=temperature,
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 ),
             )
         except errors.APIError as e:
