@@ -12,3 +12,5 @@ output/
 *.wav
 *.mp3
 *.bin
+*.egg-info/
+.venv-chatterbox/
