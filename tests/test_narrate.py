@@ -279,3 +279,39 @@ def test_weak_opening_is_reported_but_the_video_is_still_made(tmp_path):
     assert "Abertura fraca" in text and "saudação" in text
     data = json.loads((review.parent / "scripts.json").read_text(encoding="utf-8"))[0]
     assert data["opening_warnings"]
+
+
+@needs_ffmpeg
+def test_playable_detects_a_corrupt_stretch(tmp_path):
+    good = make_video(tmp_path / "ok.mp4", dur=10)
+    assert narrate.playable(good, 2.0, 3.0, False)
+    bad = tmp_path / "ruim.mp4"
+    bad.write_bytes(b"isto nao e um video" * 500)
+    assert not narrate.playable(bad, 0.0, 3.0, False)
+
+
+@needs_ffmpeg
+def test_pick_playable_redraws_when_a_stretch_is_unreadable(tmp_path, monkeypatch):
+    files = narrate.list_gameplays(gameplay_dir(tmp_path, n=2, dur=30))
+    results = iter([False, False, True])
+    monkeypatch.setattr(narrate, "playable", lambda *a: next(results))
+    game, offset, loop = narrate.pick_playable(files, 5.0, random.Random(3))
+    assert game in files and not loop
+
+
+@needs_ffmpeg
+def test_pick_playable_skips_files_that_do_not_even_open(tmp_path):
+    d = gameplay_dir(tmp_path, n=1, dur=20)
+    (d / "quebrado.mp4").write_bytes(b"lixo" * 1000)
+    files = narrate.list_gameplays(d)
+    for seed in range(6):
+        game, offset, loop = narrate.pick_playable(files, 5.0, random.Random(seed))
+        assert game.name == "game0.mp4"
+
+
+@needs_ffmpeg
+def test_pick_playable_gives_a_clear_error_when_everything_is_corrupt(tmp_path, monkeypatch):
+    files = narrate.list_gameplays(gameplay_dir(tmp_path, n=1, dur=30))
+    monkeypatch.setattr(narrate, "playable", lambda *a: False)
+    with pytest.raises(RuntimeError, match="corrompido.*-c copy"):
+        narrate.pick_playable(files, 5.0, random.Random(0), attempts=3)

@@ -40,6 +40,38 @@ def pick_gameplay(files: list[Path], needed_s: float, rng: random.Random) -> tup
     return game, 0.0, True
 
 
+def playable(game: Path, offset: float, needed_s: float, loop: bool) -> bool:
+    """Decodifica o trecho sorteado (só o vídeo, sem gerar arquivo) para descobrir ANTES do render pesado se
+    ele está corrompido. Arquivos baixados com falha costumam ter trechos ilegíveis no meio."""
+    span = min(needed_s, media.probe_duration(game)) if loop else needed_s
+    try:
+        media.run(["ffmpeg", "-v", "error", "-ss", f"{offset:.3f}", "-t", f"{span:.3f}", "-i", str(Path(game).resolve()),
+                   "-map", "0:v:0", "-an", "-f", "null", "-"])
+    except media.MediaError:
+        return False
+    return True
+
+
+def pick_playable(files: list[Path], needed_s: float, rng: random.Random,
+                  attempts: int = 8) -> tuple[Path, float, bool]:
+    """Como `pick_gameplay`, mas sorteia de novo (outro ponto ou outro arquivo) se o trecho não decodifica."""
+    bad: list[str] = []
+    for _ in range(attempts):
+        try:
+            game, offset, loop = pick_gameplay(files, needed_s, rng)
+        except media.MediaError as e:  # arquivo que nem abre
+            bad.append(str(e).splitlines()[0][:80])
+            continue
+        if playable(game, offset, needed_s, loop):
+            return game, offset, loop
+        log.warning("  trecho ilegível em %s a partir de %s: sorteando outro", game.name, review.fmt_ts(offset))
+        bad.append(f"{game.name} @ {review.fmt_ts(offset)}")
+    raise RuntimeError(
+        f"nenhum trecho legível depois de {attempts} sorteios ({'; '.join(bad[:3])}…). O arquivo de gameplay "
+        "parece corrompido (download incompleto?). Baixe de novo, ou tente consertar com: "
+        'ffmpeg -i "original.mp4" -c copy consertado.mp4')
+
+
 # ---------------------------------------------------------------- etapas
 def run_id(cfg: Config) -> str:
     """Mesmo comando = mesma pasta (o cache vale entre execuções)."""
@@ -150,7 +182,7 @@ def build_one(s: scriptlib.Script, idx: int, cfg: Config, backend: tts.Backend, 
     times = line_times(s, blocks, words, spokens)
     choices = [{"a": ln.option_a, "b": ln.option_b, "start": t0, "end": t1, "countdown": cfg.countdown_s}
                for ln, (t0, t1) in zip(s.lines, times) if ln.kind == "escolha"]
-    game, offset, loop = pick_gameplay(list_gameplays(cfg.gameplay_dir), dur, rng)
+    game, offset, loop = pick_playable(list_gameplays(cfg.gameplay_dir), dur, rng)
     name = f"{idx:02d}_{media.slugify(s.title)}.mp4"
     key = render.narration_key(game, offset, loop, words, choices, dur, cfg)
     log.info("  gameplay: %s (a partir de %s)%s", game.name, review.fmt_ts(offset), " repetindo" if loop else "")
