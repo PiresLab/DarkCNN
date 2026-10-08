@@ -1,4 +1,3 @@
-import pytest
 
 from conftest import needs_ffmpeg
 from darkcnn import voices

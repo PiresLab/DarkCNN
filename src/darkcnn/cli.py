@@ -94,6 +94,18 @@ def build_parser() -> argparse.ArgumentParser:
                     help="não abre o navegador sozinho")
     wb.add_argument("--workspace", dest="workspace_dir", type=Path)
     wb.add_argument("--output", dest="output_dir", type=Path)
+    wb.add_argument("--no-worker", dest="embedded_worker", action="store_false",
+                    help="só enfileira; a execução fica por conta de `darkcnn worker` (outro processo)")
+
+    wk = sub.add_parser("worker", help="executa a fila de jobs do painel (usado no Docker)")
+    wk.add_argument("--config", type=Path)
+    wk.add_argument("--concurrency", type=int, help="jobs ao mesmo tempo (padrão 1)")
+
+    ml = sub.add_parser("migrate-legacy", help="importa pastas/config/histórico do uso antigo para o novo layout")
+    ml.add_argument("--from", dest="origin", type=Path, default=Path("."), help="pasta do projeto antigo (padrão: .)")
+    ml.add_argument("--dry-run", action="store_true", help="só mostra o que seria copiado")
+    ml.add_argument("--with-workspace", action="store_true", help="copia também o cache (transcrições, downloads)")
+    ml.add_argument("--config", type=Path)
 
     sh = sub.add_parser("shots", help="diagnóstico do perfil visual: planos e volume (não usa o Gemini)")
     common(sh)
@@ -109,16 +121,31 @@ def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     overrides = {k: v for k, v in vars(args).items()
                  if k not in ("cmd", "input", "config", "force", "say", "all", "models",
-                               "host", "port", "open_browser")}
+                               "host", "port", "open_browser", "embedded_worker", "concurrency", "origin", "dry_run",
+                               "with_workspace")}
     if args.cmd == "web":  # o painel lê o config.yaml a cada pedido; aqui só validamos as flags
         from .web.api import serve
         try:
-            serve(args.config, args.host, args.port, overrides, args.open_browser)
+            serve(args.config, args.host, args.port, overrides, args.open_browser, args.embedded_worker)
         except ImportError as e:
             print(f"\nERRO: o painel precisa das dependências web: pip install -e \".[web]\" ({e})",
                   file=sys.stderr)
             return 1
         return 0
+    if args.cmd == "migrate-legacy":
+        from . import storage
+        from .db import Database
+        from .legacy import migrate
+        cfg = load_config(args.config, {})
+        db = Database(storage.default_database_url(cfg.workspace_dir))
+        db.init()
+        rep = migrate(args.origin, cfg, db, dry_run=args.dry_run, with_workspace=args.with_workspace)
+        head = "[simulação: nada foi copiado]" if args.dry_run else "Migração concluída:"
+        print("\n" + head + "\n" + "\n".join(rep.lines()))
+        return 0
+    if args.cmd == "worker":
+        from .web.api import run_worker
+        return run_worker(args.config, args.concurrency)
     cfg = load_config(args.config, overrides)
     if getattr(args, "input", None) and not is_url(args.input) and getattr(args, "source", None) \
             and is_url(args.source):

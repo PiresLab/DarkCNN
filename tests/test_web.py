@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from conftest import needs_ffmpeg
 
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
@@ -21,7 +20,7 @@ def state_with(tmp_path, runners=None, config=None):
     cfg_path = tmp_path / "config.yaml"
     base = {"workspace_dir": str(tmp_path / "ws"), "output_dir": str(tmp_path / "out")}
     cfg_path.write_text(yaml.safe_dump({**base, **(config or {})}), encoding="utf-8")
-    return AppState(cfg_path, runners=runners)
+    return AppState(cfg_path, runners=runners, concurrency=2)
 
 
 def client_with(tmp_path, runners=None, config=None):
@@ -96,7 +95,7 @@ def test_job_runs_captures_log_and_remembers_the_source(tmp_path):
 
     c, st = client_with(tmp_path, runners={"run": runner})
     job = c.post("/api/jobs", json={"mode": "run", "source": "https://x/y", "overrides": {"clips_per_video": 2}}).json()
-    assert wait_for(lambda: st.jobs.jobs[job["id"]].status == "done")
+    assert wait_for(lambda: st.jobs.get(job["id"])["status"] == "done")
 
     d = c.get(f"/api/jobs/{job['id']}").json()
     assert d["status"] == "done" and d["review"].endswith("review.md")
@@ -112,7 +111,7 @@ def test_job_error_is_reported_not_raised(tmp_path):
 
     c, st = client_with(tmp_path, runners={"run": runner})
     job = c.post("/api/jobs", json={"mode": "run", "source": "x"}).json()
-    assert wait_for(lambda: st.jobs.jobs[job["id"]].ended is not None)
+    assert wait_for(lambda: st.jobs.get(job["id"])["ended"] is not None)
     d = c.get(f"/api/jobs/{job['id']}").json()
     assert d["status"] == "error" and "licença não informada" in d["error"]
     assert c.get("/api/jobs").json()["jobs"][0]["id"] == job["id"]
@@ -132,7 +131,7 @@ def test_two_jobs_do_not_mix_their_logs(tmp_path):
     c, st = client_with(tmp_path, runners={"run": runner})
     a = c.post("/api/jobs", json={"mode": "run", "source": "alfa"}).json()
     b = c.post("/api/jobs", json={"mode": "run", "source": "beta"}).json()
-    assert wait_for(lambda: all(st.jobs.jobs[j["id"]].ended for j in (a, b)))
+    assert wait_for(lambda: all(st.jobs.get(j["id"])["ended"] for j in (a, b)))
     la = c.get(f"/api/jobs/{a['id']}").json()["log"]
     lb = c.get(f"/api/jobs/{b['id']}").json()["log"]
     assert la and lb
@@ -149,10 +148,10 @@ def test_cancel_marks_the_job_as_interrupted(tmp_path):
 
     c, st = client_with(tmp_path, runners={"run": runner})
     job = c.post("/api/jobs", json={"mode": "run", "source": "x"}).json()
-    assert wait_for(lambda: any("rodando" in l for l in st.jobs.jobs[job["id"]].lines))
+    assert wait_for(lambda: any("rodando" in l for l in st.jobs.logs(job["id"])[0]))
     assert c.post(f"/api/jobs/{job['id']}/cancel").json()["ok"] is True
     stop.set()
-    assert wait_for(lambda: st.jobs.jobs[job["id"]].status == "cancelled")
+    assert wait_for(lambda: st.jobs.get(job["id"])["status"] == "cancelled")
     assert c.post(f"/api/jobs/{job['id']}/cancel").status_code == 409
 
 
@@ -178,7 +177,7 @@ def test_job_stream_sends_the_lines_and_closes(tmp_path):
 
     c, st = client_with(tmp_path, runners={"run": runner})
     job = c.post("/api/jobs", json={"mode": "run", "source": "x"}).json()
-    assert wait_for(lambda: st.jobs.jobs[job["id"]].ended is not None)
+    assert wait_for(lambda: st.jobs.get(job["id"])["ended"] is not None)
     with c.stream("GET", f"/api/jobs/{job['id']}/stream") as r:
         body = "".join(chunk for chunk in r.iter_text())
     assert "event: line" in body and "primeira" in body and "segunda" in body
@@ -248,12 +247,27 @@ def test_paths_outside_the_output_dir_are_refused(tmp_path):
     assert safe_under(tmp_path / "out", "video-1/01_um.mp4").name == "01_um.mp4"
 
 
-def test_index_page_is_served(tmp_path):
+def test_spa_fallback_and_unknown_api_route(tmp_path):
     c, _ = client_with(tmp_path)
     page = c.get("/")
-    assert page.status_code == 200 and "DarkCNN Studio" in page.text
-    assert "rail-toggle" in page.text  # o botão de retrair a barra lateral
-    assert c.get("/app.js").status_code == 200 and c.get("/app.css").status_code == 200
+    assert page.status_code == 200 and "DarkCNN" in page.text
+    assert c.get("/criar").status_code == 200  # rota do React: devolve o index
+    assert c.get("/api/nao-existe").status_code == 404
+    assert c.get("/api/health").json() == {"ok": True}
+
+
+def test_gemini_key_is_saved_from_the_ui(tmp_path, monkeypatch):
+    from darkcnn import storage
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    c, _ = client_with(tmp_path)
+    assert c.put("/api/secrets/gemini", json={"key": "curta"}).status_code == 400
+    assert c.put("/api/secrets/gemini", json={"key": "AIza" + "x" * 30}).status_code == 200
+    assert c.get("/api/env").json()["api_key"] is True
+    assert storage.secret_file().read_text() == "AIza" + "x" * 30
+    c.delete("/api/secrets/gemini")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert c.get("/api/env").json()["api_key"] is False
 
 
 def test_unset_cli_flags_and_empty_fields_do_not_break_a_job(tmp_path):
@@ -265,9 +279,9 @@ def test_unset_cli_flags_and_empty_fields_do_not_break_a_job(tmp_path):
         return out / "review.md"
 
     st = AppState(tmp_path / "ausente.yaml", overrides={"workspace_dir": None, "output_dir": tmp_path / "out"},
-                  runners={"narrate": runner})
+                  runners={"narrate": runner}, database_url=f"sqlite:///{(tmp_path / 'x.db').as_posix()}")
     c = TestClient(create_app(st))
     r = c.post("/api/jobs", json={"mode": "narrate", "overrides": {"narrate_format": "e-se", "topic": None,
                                                                    "gameplay_dir": ""}})
     assert r.status_code == 200, r.text
-    assert wait_for(lambda: st.jobs.jobs[r.json()["id"]].status == "done")
+    assert wait_for(lambda: st.jobs.get(r.json()["id"])["status"] == "done")

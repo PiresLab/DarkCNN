@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from darkcnn.analyze import Candidate, Selection, TalkCandidate
+from darkcnn.analyze import TalkCandidate
 from darkcnn.config import Config
 
 

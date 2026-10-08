@@ -1,0 +1,50 @@
+# docker compose up --build   ->  http://localhost:8765
+# Sem login: não exponha a porta fora da sua máquina/rede.
+x-app: &app
+  build: .
+  env_file: .env
+  environment:
+    DATA_DIR: /data
+    DATABASE_URL: postgresql://darkcnn:${POSTGRES_PASSWORD:-darkcnn}@db:5432/darkcnn
+  volumes:
+    - data:/data
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: darkcnn
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-darkcnn}
+      POSTGRES_DB: darkcnn
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U darkcnn"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    <<: *app
+    ports:
+      - "127.0.0.1:8765:8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8765/api/health')"]
+      interval: 15s
+      retries: 5
+
+  worker:
+    <<: *app
+    command: ["darkcnn", "worker"]
+    environment:
+      DATA_DIR: /data
+      DATABASE_URL: postgresql://darkcnn:${POSTGRES_PASSWORD:-darkcnn}@db:5432/darkcnn
+      DARKCNN_WORKER_CONCURRENCY: "1"
+
+volumes:
+  pgdata:
+  data:

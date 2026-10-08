@@ -15,11 +15,12 @@ dependencies = [
     "numpy",
     "yt-dlp>=2025.11.12",
     "requests",
+    "sqlalchemy>=2",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "fastapi", "uvicorn", "httpx"]
-web = ["fastapi>=0.115", "uvicorn>=0.30"]
+dev = ["pytest", "fastapi", "uvicorn", "httpx", "python-multipart"]
+web = ["fastapi>=0.115", "uvicorn>=0.30", "python-multipart", "psycopg[binary]>=3.1", "croniter"]
 
 [project.scripts]
 darkcnn = "darkcnn.cli:main"
@@ -28,8 +29,15 @@ darkcnn = "darkcnn.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-darkcnn = ["prompts/*.md", "web/static/*"]
+darkcnn = ["prompts/*.md", "web/static/*", "web/static/assets/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E9", "F"]

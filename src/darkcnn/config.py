@@ -8,6 +8,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from . import storage
+
 
 class WatermarkCfg(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -58,7 +60,8 @@ class Config(BaseModel):
     tts_min_interval_s: float = Field(7.0, ge=0.0)  # espaço entre chamadas (o TTS tem limite por minuto)
     tts_retries: int = Field(3, ge=0)
     tts_timeout_s: float = 180.0
-    gameplay_dir: Path | None = None  # pasta com as gameplays de fundo
+    gameplay_dir: Path | None = Field(default_factory=storage.default_gameplays)  # gameplays de fundo
+    gameplay_files: list[Path] | None = None  # subconjunto escolhido (presets); None = a pasta toda
     game_volume: float = Field(0.06, ge=0.0, le=1.0)  # volume do áudio da gameplay (0 = mudo)
     pause_s: float = Field(0.35, ge=0.0)  # silêncio entre as linhas do roteiro
     countdown_s: float = Field(3.0, ge=0.0)  # tempo de decisão após uma pergunta "você prefere"
@@ -98,7 +101,7 @@ class Config(BaseModel):
     text_mode: Literal["captions", "titled", "both", "ranked", "none"] = "captions"
     layout: Literal["crop", "blur"] = "blur"
     font: str = "Arial" if os.name == "nt" else "DejaVu Sans"
-    fonts_dir: Path | None = None
+    fonts_dir: Path | None = Field(default_factory=storage.default_fonts)
     preset: str = "medium"
     crf: int = 20
     watermark: WatermarkCfg = WatermarkCfg()
@@ -108,8 +111,8 @@ class Config(BaseModel):
     license: str | None = None  # ex.: "CC-BY 4.0", "autorizado por <canal> em <data>"
 
     # --- pastas ---
-    workspace_dir: Path = Path("workspace")
-    output_dir: Path = Path("output")
+    workspace_dir: Path = Field(default_factory=storage.default_workspace)
+    output_dir: Path = Field(default_factory=storage.default_output)
 
     @model_validator(mode="after")
     def _check(self) -> "Config":

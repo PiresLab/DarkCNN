@@ -30,6 +30,16 @@ def list_gameplays(folder: Path) -> list[Path]:
     return files
 
 
+def gameplay_pool(cfg: Config) -> list[Path]:
+    """Gameplays elegíveis: os arquivos escolhidos no preset (se existirem) ou a pasta toda."""
+    if cfg.gameplay_files:
+        files = [Path(f) for f in cfg.gameplay_files if Path(f).is_file()]
+        if not files:
+            raise FileNotFoundError("nenhuma das gameplays escolhidas existe mais")
+        return files
+    return list_gameplays(cfg.gameplay_dir)
+
+
 def pick_gameplay(files: list[Path], needed_s: float, rng: random.Random) -> tuple[Path, float, bool]:
     """Sorteia um arquivo e um ponto de entrada. Se o vídeo for curto demais, ele é repetido."""
     game = rng.choice(files)
@@ -183,7 +193,7 @@ def build_one(s: scriptlib.Script, idx: int, cfg: Config, backend: tts.Backend, 
     choices = [{"a": ln.option_a, "b": ln.option_b, "start": t0, "end": t1, "countdown": cfg.countdown_s}
                for ln, (t0, t1) in zip(s.lines, times) if ln.kind == "escolha"]
     voice_track = tts.mix_ticks(track, choices, cfg.tick_volume, work / "voice_ticks.wav")  # só depois do Whisper
-    game, offset, loop = pick_playable(list_gameplays(cfg.gameplay_dir), dur, rng)
+    game, offset, loop = pick_playable(gameplay_pool(cfg), dur, rng)
     name = f"{idx:02d}_{media.slugify(s.title)}.mp4"
     key = render.narration_key(game, offset, loop, words, choices, dur, cfg)
     log.info("  gameplay: %s (a partir de %s)%s", game.name, review.fmt_ts(offset), " repetindo" if loop else "")
@@ -204,7 +214,7 @@ def run_narrate(cfg: Config, *, client_factory: Callable[[], GeminiClient] | Non
                 force: bool = False) -> Path:
     from .pipeline import _setup_logging, make_client
 
-    if not cfg.gameplay_dir:
+    if not cfg.gameplay_dir and not cfg.gameplay_files:
         raise ValueError("informe a pasta das gameplays de fundo: --gameplay-dir gameplays/")
     rid = run_id(cfg)
     ws, out = cfg.workspace_dir / "narrate" / rid, cfg.output_dir / "narrate" / rid

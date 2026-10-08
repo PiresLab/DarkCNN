@@ -5,7 +5,6 @@ import threading
 import pytest
 
 from conftest import YT_INFO, make_fake_ydl, make_video, needs_ffmpeg
-from darkcnn import ingest
 from darkcnn.config import Config
 from darkcnn.ingest import IngestError, apply_meta, is_cc, is_url, resolve_input
 from darkcnn.review import license_warnings

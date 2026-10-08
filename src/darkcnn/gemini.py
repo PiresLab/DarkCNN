@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -113,6 +114,9 @@ class GenaiBackend:
         return parsed, usage
 
 
+_USAGE_LOCK = threading.Lock()
+
+
 class GeminiClient:
     def __init__(
         self,
@@ -139,13 +143,16 @@ class GeminiClient:
         return int(self._load_usage().get(self._today(), {}).get("requests", 0))
 
     def _record(self, usage: dict | None) -> None:
-        data = self._load_usage()
-        day = data.setdefault(self._today(), {"requests": 0, "prompt_tokens": 0, "output_tokens": 0})
-        day["requests"] += 1
-        for k in ("prompt_tokens", "output_tokens"):
-            day[k] += (usage or {}).get(k, 0)
-        self.usage_path.parent.mkdir(parents=True, exist_ok=True)
-        self.usage_path.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        with _USAGE_LOCK:  # jobs simultâneos fazem read-modify-write no mesmo arquivo
+            data = self._load_usage()
+            day = data.setdefault(self._today(), {"requests": 0, "prompt_tokens": 0, "output_tokens": 0})
+            day["requests"] += 1
+            for k in ("prompt_tokens", "output_tokens"):
+                day[k] += (usage or {}).get(k, 0)
+            self.usage_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.usage_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+            tmp.replace(self.usage_path)
 
     def generate_json(self, prompt: str, schema: type[BaseModel], temperature: float = 0.2,
                       media: Path | None = None) -> BaseModel:

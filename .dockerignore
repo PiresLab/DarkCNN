@@ -1,0 +1,12 @@
+.venv
+.git
+workspace
+output
+gameplays
+*.mp4
+tests
+spikes
+__pycache__
+.env
+node_modules
+src/darkcnn/web/static

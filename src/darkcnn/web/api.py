@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
 import time
 from pathlib import Path
 from typing import Any, Iterator
@@ -15,7 +14,9 @@ import yaml
 from pydantic import BaseModel, ValidationError
 
 from .. import media
+from .. import storage
 from ..config import Config, load_config
+from ..db import Database
 from .jobs import JobManager
 
 log = logging.getLogger(__name__)
@@ -28,11 +29,29 @@ class AppState:
     """Config lida do disco a cada pedido: salvar no painel vale para a próxima geração."""
 
     def __init__(self, config_path: Path | None, overrides: dict | None = None,
-                 runners: dict | None = None):
-        self.config_path = config_path or Path("config.yaml")
+                 runners: dict | None = None, embedded_worker: bool = True,
+                 concurrency: int | None = None, database_url: str | None = None):
+        self.config_path = config_path or storage.default_config_path()
         # as flags da CLI chegam com None quando não foram passadas; None aqui quebraria o Config
         self.overrides = {k: v for k, v in (overrides or {}).items() if v is not None}
-        self.jobs = JobManager(self.cfg(), runners)
+        self.db = Database(database_url or storage.default_database_url(self.cfg().workspace_dir))
+        self.db.init()
+        try:  # vídeos já presentes na pasta (ex.: ./gameplays do uso antigo) entram na biblioteca
+            from .. import gameplays as gp
+            gp.sync_folder(self.db, self.gameplay_dir())
+        except Exception:  # noqa: BLE001 - sem ffprobe/pasta o painel ainda deve abrir
+            log.warning("não consegui varrer a pasta de gameplays", exc_info=True)
+        self.jobs = JobManager(self.db, runners, embedded_worker=embedded_worker, concurrency=concurrency,
+                               base_config=self.saved if embedded_worker else None,
+                               gameplay_dir=self.gameplay_dir)
+
+    def gameplay_dir(self) -> Path:
+        """Onde a biblioteca de gameplays mora: o configurado, o volume Docker ou ./gameplays."""
+        try:
+            cfg = self.cfg()
+        except (ValidationError, ValueError, yaml.YAMLError):
+            return Path("gameplays")
+        return Path(cfg.gameplay_dir) if cfg.gameplay_dir else Path(cfg.workspace_dir).parent / "gameplays"
 
     def cfg(self) -> Config:
         path = self.config_path if self.config_path.exists() else None
@@ -111,6 +130,10 @@ class ConfigRequest(BaseModel):
     values: dict[str, Any]
 
 
+class KeyRequest(BaseModel):
+    key: str
+
+
 class ItemPatch(BaseModel):
     status: str | None = None
     start: float | None = None
@@ -127,7 +150,7 @@ class SampleRequest(BaseModel):
 
 def create_app(state: AppState | None = None) -> Any:
     from fastapi import FastAPI, HTTPException
-    from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+    from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
     from fastapi.staticfiles import StaticFiles
 
     st = state or AppState(None)
@@ -146,6 +169,13 @@ def create_app(state: AppState | None = None) -> Any:
         except (ValueError, yaml.YAMLError) as e:  # arquivo editado à mão e quebrado
             raise HTTPException(400, f"config.yaml inválido: {e}") from e
 
+    @app.get("/api/health")
+    def health() -> dict:
+        from sqlalchemy import text
+        with st.db.session() as sess:
+            sess.execute(text("SELECT 1"))
+        return {"ok": True}
+
     @app.get("/api/env")
     def env() -> dict:
         import os
@@ -155,10 +185,8 @@ def create_app(state: AppState | None = None) -> Any:
             ffmpeg = True
         except media.MediaError:
             ffmpeg = False
-        games = 0
-        if cfg.gameplay_dir and Path(cfg.gameplay_dir).is_dir():
-            games = sum(1 for p in Path(cfg.gameplay_dir).rglob("*")
-                        if p.is_file() and p.suffix.lower() in {".mp4", ".mkv", ".mov", ".webm", ".avi"})
+        from .. import gameplays as gp
+        games = len(gp.list_all(st.db))
         usage = {}
         upath = Path(cfg.workspace_dir) / "usage.json"
         if upath.exists():
@@ -170,7 +198,7 @@ def create_app(state: AppState | None = None) -> Any:
         return {
             "ffmpeg": ffmpeg,
             "whisper_model": cfg.whisper_model,
-            "api_key": bool(os.environ.get("GEMINI_API_KEY")),
+            "api_key": bool(os.environ.get("GEMINI_API_KEY")) or storage.secret_file().exists(),
             "gameplays": games,
             "config_path": str(st.config_path),
             "config_exists": st.config_path.exists(),
@@ -179,6 +207,26 @@ def create_app(state: AppState | None = None) -> Any:
             "tokens_today": int(today.get("prompt_tokens", 0)) + int(today.get("output_tokens", 0)),
             "output_dir": str(cfg.output_dir),
         }
+
+    @app.put("/api/secrets/gemini")
+    def put_gemini_key(body: KeyRequest) -> dict:
+        key = body.key.strip()
+        if len(key) < 20 or any(c.isspace() for c in key):
+            raise HTTPException(400, "essa chave não parece válida")
+        path = storage.secret_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(key, encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        storage.apply_secrets()
+        return {"ok": True}
+
+    @app.delete("/api/secrets/gemini")
+    def delete_gemini_key() -> dict:
+        storage.secret_file().unlink(missing_ok=True)
+        return {"ok": True}
 
     @app.get("/api/config")
     def get_config() -> dict:
@@ -207,17 +255,17 @@ def create_app(state: AppState | None = None) -> Any:
             raise HTTPException(400, _pretty_errors(e)) from e
         label = body.label or body.source or cfg.narrate_format
         try:
-            job = st.jobs.start(body.mode, cfg, body.source, label, extra, body.force)
+            return st.jobs.enqueue(body.mode, cfg, body.source, label, extra, body.force)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
-        return job.summary()
 
     @app.get("/api/jobs/{jid}")
     def job_detail(jid: str, since: int = 0) -> dict:
-        job = st.jobs.jobs.get(jid)
+        job = st.jobs.get(jid)
         if job is None:
             raise HTTPException(404, "execução não encontrada")
-        return job.detail(since)
+        lines, nxt = st.jobs.logs(jid, since)
+        return {**job, "log": lines, "next": nxt}
 
     @app.post("/api/jobs/{jid}/cancel")
     def cancel_job(jid: str) -> dict:
@@ -227,32 +275,27 @@ def create_app(state: AppState | None = None) -> Any:
 
     @app.get("/api/jobs/{jid}/stream")
     def stream_job(jid: str) -> Any:
-        job = st.jobs.jobs.get(jid)
-        if job is None:
+        if st.jobs.get(jid) is None:
             raise HTTPException(404, "execução não encontrada")
 
         def events() -> Iterator[str]:
-            sent = len(job.lines)
-            for line in job.lines:
-                yield _sse("line", line)
-            if job.ended is not None:
-                yield _sse("end", job.status)
-                return
-            q = st.jobs.subscribe(jid)
-            try:
-                while True:
-                    try:
-                        line = q.get(timeout=20)
-                    except queue.Empty:
-                        yield ": ping\n\n"
-                        continue
-                    if line is None:
-                        yield _sse("end", job.status)
-                        return
-                    sent += 1
+            seq, idle = 0, 0.0
+            while True:
+                lines, seq = st.jobs.logs(jid, seq)
+                for line in lines:
                     yield _sse("line", line)
-            finally:
-                st.jobs.unsubscribe(jid, q)
+                job = st.jobs.get(jid)
+                if job is None or job["status"] not in ("queued", "running"):
+                    lines, seq = st.jobs.logs(jid, seq)  # o que chegou entre a leitura e o status
+                    for line in lines:
+                        yield _sse("line", line)
+                    yield _sse("end", job["status"] if job else "error")
+                    return
+                idle = 0.0 if lines else idle + 0.5
+                if idle >= 20:
+                    yield ": ping\n\n"
+                    idle = 0.0
+                time.sleep(0.5)
 
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -342,8 +385,26 @@ def create_app(state: AppState | None = None) -> Any:
         return {"voice": voice, "file": dest.relative_to(Path(cfg.output_dir)).as_posix(),
                 "seconds": round(media.probe_duration(dest), 2), "took": round(time.perf_counter() - t0, 1)}
 
+    from . import routes_auto
+    routes_auto.register(app, st)
+
     static = Path(__file__).parent / "static"
-    app.mount("/", StaticFiles(directory=static, html=True), name="static")
+    if (static / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str) -> Any:
+        if path.startswith("api/"):
+            raise HTTPException(404, "rota não encontrada")
+        target = (static / path).resolve()
+        if path and static.resolve() in target.parents and target.is_file():
+            return FileResponse(target)
+        index = static / "index.html"
+        if index.is_file():
+            return FileResponse(index)
+        return HTMLResponse("<h1>DarkCNN Studio</h1><p>Interface não compilada. Rode "
+                            "<code>npm install &amp;&amp; npm run build</code> em <code>src/darkcnn/web/ui</code>.</p>",
+                            status_code=200)
     return app
 
 
@@ -364,10 +425,10 @@ def _pretty_errors(e: ValidationError) -> str:
 
 
 def serve(config_path: Path | None, host: str = "127.0.0.1", port: int = 8765,
-          overrides: dict | None = None, open_browser: bool = True) -> None:
+          overrides: dict | None = None, open_browser: bool = True, embedded_worker: bool = True) -> None:
     import uvicorn
 
-    app = create_app(AppState(config_path, overrides))
+    app = create_app(AppState(config_path, overrides, embedded_worker=embedded_worker))
     url = f"http://{host}:{port}/"
     print(f"\nDarkCNN Studio em {url}  (Ctrl+C para parar)\n")
     if open_browser:
@@ -375,3 +436,37 @@ def serve(config_path: Path | None, host: str = "127.0.0.1", port: int = 8765,
         import webbrowser
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+def run_worker(config_path: Path | None, concurrency: int | None = None) -> int:
+    """Processo só de execução: consome a fila do banco até Ctrl+C / SIGTERM."""
+    import signal
+    import threading
+
+    from .jobs import JobStore, Worker
+
+    cfg_path = config_path or storage.default_config_path()
+    cfg = load_config(cfg_path if cfg_path.exists() else None)
+    db = Database(storage.default_database_url(cfg.workspace_dir))
+    db.init()
+    from ..scheduler import Scheduler
+
+    store = JobStore(db)
+
+    def base() -> dict:
+        return (yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}) if cfg_path.exists() else {}
+
+    def gdir() -> Path:
+        c = load_config(cfg_path if cfg_path.exists() else None)
+        return Path(c.gameplay_dir) if c.gameplay_dir else Path(c.workspace_dir).parent / "gameplays"
+
+    scheduler = Scheduler(db, lambda pid: store.enqueue_preset(pid, base(), gdir()))
+    worker = Worker(store, concurrency=concurrency, scheduler=scheduler)
+    worker.start()
+    print("worker DarkCNN rodando (Ctrl+C para parar)")
+    stop = threading.Event()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: stop.set())
+    stop.wait()
+    worker.stop()
+    return 0
