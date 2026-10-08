@@ -13,3 +13,9 @@ output/
 *.mp3
 *.bin
 *.egg-info/
+
+# UI
+node_modules/
+src/darkcnn/web/static/
+.thumbs/
+.claude/

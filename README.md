@@ -12,7 +12,28 @@ vídeo -> Whisper local (palavras com tempo) -> Gemini escolhe os trechos (por I
 tempos (erro mediano medido de ~0,5 s): devolve IDs de frase, e os tempos vêm do Whisper. Todo corte começa e
 termina em limite de frase. Detalhes e números medidos: [`docs/fase0-resultados.md`](docs/fase0-resultados.md).
 
-## Instalação (Windows, PowerShell)
+## Início rápido com Docker (recomendado)
+
+```bash
+cp .env.example .env          # cole a GEMINI_API_KEY (ou salve depois, em Configurações)
+docker compose up --build     # abre http://localhost:8765
+```
+
+Sobem três serviços: `app` (API + interface), `worker` (executa a fila e dispara as automações agendadas)
+e `db` (Postgres). Os dados ficam em volumes: `data` (`/data/gameplays`, `/data/outputs`, `/data/workspace`,
+`config.yaml`, chave do Gemini) e `pgdata`. Reiniciar ou recriar os containers não perde histórico, vídeos nem
+gameplays enviadas.
+
+> Sem login: a porta só é publicada em `127.0.0.1`. Não exponha na internet sem um proxy com autenticação.
+
+### Trazendo o que você já tinha
+```bash
+darkcnn migrate-legacy --dry-run          # mostra o que seria copiado (a origem nunca é alterada)
+darkcnn migrate-legacy [--with-workspace] # copia config.yaml, saídas, gameplays e importa o histórico
+```
+Dentro do Docker: `docker compose run --rm -v "$PWD":/old app darkcnn migrate-legacy --from /old`.
+
+## Instalação local (Windows, PowerShell)
 ```powershell
 winget install Gyan.FFmpeg                    # FFmpeg "full" (precisa de libass); reabra o terminal
 winget install DenoLand.Deno                  # runtime JS que o yt-dlp pede para baixar do YouTube em qualidade total
@@ -73,30 +94,31 @@ da fonte, que vale para todos os trechos. Passa de 3 min? Ele avisa (limite do Y
 **Mudar a ordem ou os limites:** edite `rank`, `start`, `end` ou `title` no `selection.json` (o `rank` define a posição) e rode
 `python -m darkcnn render "<link>" --theme "top 5 finalizações"`: só os trechos alterados são renderizados de novo.
 
-## Painel (`web`)
-
-Tela local para configurar, gerar e revisar sem decorar flags. Ela não reimplementa nada: chama o mesmo
-pipeline do terminal e mostra o log ao vivo.
+## Interface web (`web`)
 
 ```powershell
 pip install -e ".[web]"
-python -m darkcnn web                 # abre http://127.0.0.1:8765 no navegador
-python -m darkcnn web --port 9000 --no-browser
+cd src\darkcnn\web\ui; npm install; npm run build; cd ..\..\..\..   # compila a interface (uma vez)
+python -m darkcnn web                 # http://127.0.0.1:8765 (fila e worker embutidos, SQLite local)
+python -m darkcnn web --no-worker     # só API: rode `python -m darkcnn worker` em outro terminal
 ```
 
-- **Visão geral:** requisições e tokens do dia, execuções recentes, saídas e os avisos de antes de postar.
-- **Nova geração:** os três modos (cortes, compilado, narração) em formulário, com custo estimado e o
-  **comando equivalente** do terminal ao lado, para você conferir o que vai rodar.
-- **Execuções:** etapas, log ao vivo (SSE) e **Interromper**, que mata o FFmpeg daquela execução sem afetar as outras.
-- **Revisão:** prévia do vídeo, notas da 1ª passada e do juiz, aprovar/descartar e ajustar início, fim e título
-  (grava no `selection.json`; depois "Re-renderizar" refaz só o que mudou, sem Gemini).
-- **Configurações:** grava o `config.yaml`, com o arquivo mostrado ao vivo; chave desconhecida é recusada com o
-  nome do campo. Também lista os modelos de voz e gera uma amostra.
+- **Criar vídeo:** assistente em passos (tipo, conteúdo, voz e fundo). "Gerar agora" ou "Salvar como automação".
+- **Automações:** presets que rodam sozinhos. A IA propõe o tema (sem repetir os anteriores) e, nos cortes e
+  compilados, busca no YouTube (yt-dlp), filtra por duração e escolhe o vídeo-fonte. Só as gameplays são fixas.
+  Agenda por cron (ex.: todo dia às 18:00); se o servidor ficou desligado, a execução perdida roda uma vez.
+- **Meus vídeos:** prévia, aprovar/rejeitar, ajustar título e cortes, refazer e baixar.
+- **Gameplays:** upload pela interface (validado com ffprobe, com miniatura) para o volume.
+- **Execuções:** fila persistente, andamento por etapa, cancelamento e log técnico recolhido.
+- **Configurações:** chave do Gemini, voz (com prévia), aparência e limites. O resto fica em "Avançado".
 
-A barra lateral retrai no botão ao lado do logo (ou `Ctrl+B`) e a escolha fica salva no navegador.
+Desenvolvimento da interface: `npm run dev` em `src/darkcnn/web/ui` (porta 5173, repassa `/api` para o 8765).
 
-> Serve em `127.0.0.1` e **não tem senha**: é ferramenta local. Não exponha a porta na internet nem rode com
-> `--host 0.0.0.0` numa rede que você não controla.
+Variáveis: `DATA_DIR` (raiz dos dados; no Docker `/data`), `DATABASE_URL` (Postgres; padrão SQLite em
+`workspace/darkcnn.db`), `DARKCNN_WORKER_CONCURRENCY` (jobs simultâneos, padrão 1).
+
+> Serve em `127.0.0.1` e **não tem senha**. Não exponha a porta na internet nem rode com `--host 0.0.0.0`
+> numa rede que você não controla.
 
 ## Vídeos narrados sobre gameplay (`narrate`)
 Sem vídeo-fonte: a IA escreve o roteiro, uma voz narra e o texto aparece como legenda sobre uma gameplay
@@ -217,7 +239,9 @@ real (narração, comentário, edição própria) e prefira fontes com permissã
 
 ## Desenvolvimento
 ```powershell
-pip install -e ".[dev]"
+pip install -e ".[dev,web]" ruff
+ruff check src tests
 pytest                                        # usa FFmpeg real em vídeo sintético; Whisper e Gemini são falsos
 ```
+O CI (`.github/workflows/ci.yml`) roda ruff, pytest, o build da interface e o `docker build`.
 `spikes/` guarda os testes de validação da Fase 0 (medem Whisper, tokens e timestamps do Gemini no seu PC).
