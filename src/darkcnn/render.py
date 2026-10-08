@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import cache, textlayers
 from .config import Config
-from .media import has_audio, run
+from .media import MediaError, has_audio, run
 
 log = logging.getLogger(__name__)
 
@@ -136,30 +136,41 @@ def render_narration(gameplay: Path, offset: float, loop: bool, voice_wav: Path,
             raise FileNotFoundError(f"marca d'água não encontrada: {wm}")
         shutil.copyfile(wm, workdir / "wm.png")
 
-    mix = cfg.game_volume > 0 and has_audio(gameplay)
-    parts = [video_chain(cfg.layout), "[v0]ass=subs.ass" + (":fontsdir=fonts" if has_fonts else "") + "[v1]"]
-    last = "v1"
-    if has_wm:
-        w = cfg.watermark
-        parts.append(f"[2:v]format=rgba,colorchannelmixer=aa={w.opacity:.2f}[wm]")
-        parts.append(f"[{last}][wm]overlay={w.x}:{w.y}[v]")
-        last = "v"
-    if mix:  # normalize=0: sem isso o amix derruba o volume da voz pela metade
-        parts.append(f"[0:a]volume={cfg.game_volume:.3f}[g]")
-        parts.append("[g][1:a]amix=inputs=2:duration=longest:normalize=0[a]")
+    def encode(mix: bool) -> None:
+        parts = [video_chain(cfg.layout), "[v0]ass=subs.ass" + (":fontsdir=fonts" if has_fonts else "") + "[v1]"]
+        last = "v1"
+        if has_wm:
+            w = cfg.watermark
+            parts.append(f"[2:v]format=rgba,colorchannelmixer=aa={w.opacity:.2f}[wm]")
+            parts.append(f"[{last}][wm]overlay={w.x}:{w.y}[v]")
+            last = "v"
+        if mix:  # normalize=0: sem isso o amix derruba o volume da voz pela metade
+            parts.append(f"[0:a]volume={cfg.game_volume:.3f}[g]")
+            parts.append("[g][1:a]amix=inputs=2:duration=longest:normalize=0[a]")
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+        if loop:  # gameplay mais curta que a narração: repete
+            cmd += ["-stream_loop", "-1"]
+        cmd += ["-ss", f"{offset:.3f}", "-t", f"{dur:.3f}", "-i", str(gameplay), "-i", str(voice_wav)]
+        if has_wm:
+            cmd += ["-i", "wm.png"]
+        cmd += [
+            "-filter_complex", ";".join(parts), "-map", f"[{last}]", "-map", "[a]" if mix else "1:a",
+            "-t", f"{dur:.3f}", "-c:v", "libx264", "-crf", str(cfg.crf), "-preset", cfg.preset,
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "out.mp4",
+        ]
+        run(cmd, cwd=workdir)
 
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
-    if loop:  # gameplay mais curta que a narração: repete
-        cmd += ["-stream_loop", "-1"]
-    cmd += ["-ss", f"{offset:.3f}", "-t", f"{dur:.3f}", "-i", str(gameplay), "-i", str(voice_wav)]
-    if has_wm:
-        cmd += ["-i", "wm.png"]
-    cmd += [
-        "-filter_complex", ";".join(parts), "-map", f"[{last}]", "-map", "[a]" if mix else "1:a",
-        "-t", f"{dur:.3f}", "-c:v", "libx264", "-crf", str(cfg.crf), "-preset", cfg.preset,
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "out.mp4",
-    ]
-    run(cmd, cwd=workdir)
+    mix = cfg.game_volume > 0 and has_audio(gameplay)
+    try:
+        encode(mix)
+    except MediaError as e:
+        if not mix:
+            raise
+        # o áudio de algumas gameplays quebra ao decodificar a partir de um ponto sorteado; ele só serve
+        # de ambiente (volume baixo), então refazemos sem ele em vez de perder o vídeo
+        log.warning("  o áudio da gameplay não pôde ser decodificado nesse trecho; renderizando só com a voz "
+                    "(%s)", str(e).splitlines()[-1][:120] if str(e).splitlines() else "")
+        encode(False)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.unlink(missing_ok=True)
     shutil.move(str(workdir / "out.mp4"), dest)

@@ -238,3 +238,29 @@ def test_each_video_draws_its_voice_from_the_pool(tmp_path):
     assert len(fake.voices) == 2 and set(fake.voices) <= {"Puck", "Charon", "Fenrir"}
     data = json.loads((review.parent / "scripts.json").read_text(encoding="utf-8"))
     assert [v["voice"] for v in data] == fake.voices
+
+
+@needs_ffmpeg
+def test_render_falls_back_to_voice_only_when_the_game_audio_cannot_be_decoded(tmp_path, monkeypatch):
+    from darkcnn import render
+    from darkcnn.media import MediaError
+
+    game = tmp_path / "g.mp4"
+    make_video(game, dur=5)
+    voice = tmp_path / "v.wav"
+    make_wav(voice, dur=1.5)
+    real_run, calls = render.run, []
+
+    def flaky(cmd, cwd=None):
+        calls.append([str(c) for c in cmd])
+        if any("amix" in str(c) for c in cmd):  # imita o ffmpeg quebrando ao decodificar o áudio da gameplay
+            raise MediaError("falhou (69): Decode error rate 0.97 exceeds maximum")
+        return real_run(cmd, cwd=cwd)
+
+    monkeypatch.setattr(render, "run", flaky)
+    cfg = narrate_cfg(tmp_path, preset="ultrafast")
+    words = [{"w": "olá", "start": 0.1, "end": 0.6, "p": 1}]
+    dest = tmp_path / "out" / "v.mp4"
+    assert render.render_narration(game, 0.0, False, voice, words, [], 1.5, cfg, dest, tmp_path / "w", "k")
+    assert dest.exists() and probe_duration(dest) == pytest.approx(1.5, abs=0.3)
+    assert len(calls) == 2 and not any("amix" in c for c in calls[1])
