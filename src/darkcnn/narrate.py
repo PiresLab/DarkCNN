@@ -83,18 +83,53 @@ def heard_per_line(track: Path, spokens: list[tts.Spoken], cfg: Config,
     return out
 
 
+def make_blocks(s: scriptlib.Script) -> list[list[int]]:
+    """Índices das linhas de cada bloco. Uma chamada de TTS fala o bloco inteiro (o TTS tem limite de
+    requisições); a contagem regressiva de uma pergunta "você prefere" fecha o bloco."""
+    blocks: list[list[int]] = []
+    cur: list[int] = []
+    for i, ln in enumerate(s.lines):
+        cur.append(i)
+        if ln.kind == "escolha":
+            blocks.append(cur)
+            cur = []
+    if cur:
+        blocks.append(cur)
+    return blocks
+
+
+def line_times(s: scriptlib.Script, blocks: list[list[int]], words: list[Word],
+               spokens: list[tts.Spoken]) -> list[tuple[float, float]]:
+    """Início/fim de cada linha, achados nas palavras já alinhadas (uma palavra por token do roteiro)."""
+    out: list[tuple[float, float]] = [(0.0, 0.0)] * len(s.lines)
+    k = 0
+    for blk, sp in zip(blocks, spokens):
+        for i in blk:
+            n = len(s.lines[i].text.split())
+            start = words[k]["start"] if n and k < len(words) else sp.start
+            k += n
+            end = words[k - 1]["end"] if n and 0 < k <= len(words) else start
+            out[i] = (start, end)
+        out[blk[-1]] = (out[blk[-1]][0], sp.end)  # a última fala do bloco vai até o fim do áudio
+    return out
+
+
 def build_one(s: scriptlib.Script, idx: int, cfg: Config, backend: tts.Backend, transcriber: Transcriber,
               ws: Path, out: Path, rng: random.Random) -> dict[str, Any]:
     """Um roteiro -> um vídeo. Devolve os metadados para o review."""
     work = ws / f"{idx:02d}"
     work.mkdir(parents=True, exist_ok=True)
-    texts = [ln.text for ln in s.lines]
-    log.info("roteiro %d: %s (%d linhas)", idx, s.title, len(texts))
+    voice = tts.pick_voice(cfg, rng)
+    blocks = make_blocks(s)
+    texts = [" ".join(s.lines[i].text for i in blk) for blk in blocks]
+    log.info("roteiro %d: %s (%d linhas, %d bloco(s) de voz, voz %s)", idx, s.title, len(s.lines),
+             len(blocks), voice)
 
-    wavs, made = tts.synthesize(texts, cfg, backend, ws / "voice")
-    log.info("  %d linha(s) sintetizada(s), %d reaproveitada(s) do cache", made, len(texts) - made)
-    pauses = [cfg.pause_s + (cfg.countdown_s if ln.kind == "escolha" else 0.0) for ln in s.lines]
-    pauses[-1] = 0.0  # sem silêncio depois da última linha
+    wavs, made = tts.synthesize(texts, voice, cfg, backend, ws / "voice")
+    log.info("  %d bloco(s) sintetizado(s), %d reaproveitado(s) do cache", made, len(texts) - made)
+    pauses = [cfg.pause_s + (cfg.countdown_s if s.lines[blk[-1]].kind == "escolha" else 0.0)
+              for blk in blocks]
+    pauses[-1] = 0.0  # sem silêncio depois da última fala
     spokens = tts.place(wavs, pauses)
     track = work / "voice.wav"
     dur = tts.build_track(spokens, track)
@@ -106,12 +141,12 @@ def build_one(s: scriptlib.Script, idx: int, cfg: Config, backend: tts.Backend, 
     words = align.align_script([(t, sp.start, sp.end - sp.start) for t, sp in zip(texts, spokens)], heard)
     conf = min((align.matched_fraction(t, h) for t, h in zip(texts, heard)), default=1.0)
     if conf < 0.5:
-        log.warning("  em alguma linha o Whisper reconheceu pouco do texto (%.0f%%): a legenda pode "
+        log.warning("  em algum trecho o Whisper reconheceu pouco do texto (%.0f%%): a legenda pode "
                     "sair fora de sincronia ali", conf * 100)
 
-    choices = [{"a": ln.option_a, "b": ln.option_b, "start": sp.start, "end": sp.end,
-                "countdown": cfg.countdown_s}
-               for ln, sp in zip(s.lines, spokens) if ln.kind == "escolha"]
+    times = line_times(s, blocks, words, spokens)
+    choices = [{"a": ln.option_a, "b": ln.option_b, "start": t0, "end": t1, "countdown": cfg.countdown_s}
+               for ln, (t0, t1) in zip(s.lines, times) if ln.kind == "escolha"]
     game, offset, loop = pick_gameplay(list_gameplays(cfg.gameplay_dir), dur, rng)
     name = f"{idx:02d}_{media.slugify(s.title)}.mp4"
     key = render.narration_key(game, offset, loop, words, choices, dur, cfg)
@@ -121,10 +156,10 @@ def build_one(s: scriptlib.Script, idx: int, cfg: Config, backend: tts.Backend, 
         log.info("  já renderizado (mesma configuração), pulando")
     return {
         "rank": idx, "file": name, "title": s.title, "topic": s.topic, "duration": round(dur, 2),
-        "voice": cfg.voice, "format": cfg.narrate_format, "gameplay": str(game), "gameplay_start": offset,
+        "voice": voice, "format": cfg.narrate_format, "gameplay": str(game), "gameplay_start": offset,
         "gameplay_loop": loop, "match": round(conf, 2),
         "lines": [{"text": ln.text, "kind": ln.kind, "option_a": ln.option_a, "option_b": ln.option_b,
-                   "start": sp.start, "end": sp.end} for ln, sp in zip(s.lines, spokens)],
+                   "start": round(t0, 2), "end": round(t1, 2)} for ln, (t0, t1) in zip(s.lines, times)],
     }
 
 
@@ -138,9 +173,8 @@ def run_narrate(cfg: Config, *, client_factory: Callable[[], GeminiClient] | Non
     rid = run_id(cfg)
     ws, out = cfg.workspace_dir / "narrate" / rid, cfg.output_dir / "narrate" / rid
     _setup_logging(ws)
-    log.info("narração: formato=%s voz=%s roteiros=%d alvo=%.0fs modelo=%s", cfg.narrate_format, cfg.voice,
-             cfg.count, cfg.target_s, cfg.gemini_model)
-    tts.get_voice(cfg)  # falha cedo se a voz não existir no config
+    log.info("narração: formato=%s roteiros=%d alvo=%.0fs modelo=%s tts=%s", cfg.narrate_format,
+             cfg.count, cfg.target_s, cfg.gemini_model, cfg.tts_model)
     scripts = step_scripts(ws, cfg, client_factory or (lambda: make_client(cfg)), force)
     backend = backend or tts.make_backend(cfg)
     rng = random.Random(cfg.seed)

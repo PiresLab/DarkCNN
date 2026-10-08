@@ -77,8 +77,9 @@ da fonte, que vale para todos os trechos. Passa de 3 min? Ele avisa (limite do Y
 Sem vídeo-fonte: a IA escreve o roteiro, uma voz narra e o texto aparece como legenda sobre uma gameplay
 aleatória da sua pasta.
 ```powershell
-python -m darkcnn voices --say "testando a voz"        # 1) confira a voz antes de gastar um roteiro
-python -m darkcnn narrate --format curiosidade --count 3 --voice gumball --gameplay-dir gameplays\
+python -m darkcnn voices --models                      # 1) qual modelo TTS a sua chave enxerga
+python -m darkcnn voices --say "testando a voz" --all  # 2) ouça algumas vozes (output\voices\*.wav)
+python -m darkcnn narrate --format curiosidade --count 3 --voice Kore --gameplay-dir gameplays\
 python -m darkcnn narrate --format voce-prefere --count 2
 ```
 Sai `output\narrate\<id>\01_titulo.mp4` + `review.md` com o roteiro falado, o tema e a gameplay usada.
@@ -93,28 +94,27 @@ Sai `output\narrate\<id>\01_titulo.mp4` + `review.md` com o roteiro falado, o te
 Sem `--topic`, a IA escolhe o tema. Outras opções: `--count` (quantos vídeos), `--target-s` (duração alvo),
 `--game-volume` (padrão 6%), `--seed` (fixa o sorteio da gameplay), `--layout`, `--watermark`, `--model`.
 
-**Como os tempos da legenda são exatos:** a voz é sintetizada linha por linha, o Whisper ouve a narração e o
+**Como os tempos da legenda são exatos:** a voz é sintetizada por bloco de roteiro, o Whisper ouve a narração e o
 código casa o que ele ouviu com o texto **que sabemos que foi falado**. Assim a legenda mostra o roteiro
 (sem erro de audição) com o tempo real de cada palavra. Se o Whisper reconhecer pouco, o `review.md` avisa.
 
-**Cache:** roteiro e voz ficam em `workspace\narrate\<id>\`. Mudar uma linha re-sintetiza **só ela** —
-importante porque a síntese em CPU é lenta. Rodar o mesmo comando de novo não gasta nada.
+**Cache:** roteiro e voz ficam em `workspace\narrate\<id>\`. Mudar o texto de um bloco re-sintetiza **só ele**.
+Rodar o mesmo comando de novo não gasta nada.
 
-### Instalar o GPT-SoVITS (as vozes)
-O DarkCNN fala com o GPT-SoVITS pela API dele; ele roda em separado:
-```powershell
-# na pasta do GPT-SoVITS, depois de instalado:
-python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml
-```
-Para cada voz você precisa de um **áudio de referência de 3 a 10 segundos** e da transcrição exata dele,
-declarados em `voices:` no `config.yaml` (veja o `config.example.yaml`). O caminho do áudio é lido pela
-máquina onde o **servidor** roda. Sem GPU a síntese é lenta: o `darkcnn voices --say` mede e estima quanto
-tempo levaria uma narração inteira.
+### A voz (TTS do Gemini)
+Usa a mesma `GEMINI_API_KEY` do resto. Sem instalar nada: a voz vem do próprio Gemini (vozes prontas como `Kore`,
+`Puck`, `Charon`…), em português do Brasil, com o estilo definido em `tts_style`.
+- **Poucas requisições:** a voz é pedida por bloco, então um vídeo de `curiosidade`/`e-se` gasta **1 requisição de voz**;
+  `voce-prefere` gasta uma por pergunta. O TTS tem limite próprio (por minuto e por dia) e `tts_min_interval_s`
+  espaça as chamadas. **Não confirmei se o free tier inclui TTS** (as fontes divergem): olhe a página de limites do
+  AI Studio e rode `darkcnn voices --models`.
+- **ID do modelo e vozes mudam** (os modelos TTS são "preview"): `tts_model` e `tts_voice` ficam no `config.yaml`.
+- **Qualidade:** ouça as vozes com `voices --say ... --all`, ajuste `tts_style` (tom, ritmo) e `tts_speed` (1.1 deixa
+  mais "de short"). `tts_voices_pool: [Kore, Puck, Charon]` sorteia uma voz por vídeo.
 
-> **Antes de publicar:** personagens famosos e seus dubladores têm direitos próprios, e clonar essas vozes
-> num canal monetizado tem risco real de reclamação. Narração de IA sobre gameplay feita em série também é
-> o caso que as plataformas tratam como conteúdo em massa. O `review.md` repete esses avisos, e o roteiro é
-> escrito por IA: confira os fatos antes de postar.
+> **Antes de publicar:** narração de IA sobre gameplay feita em série é o caso que as plataformas tratam como
+> conteúdo em massa, e a voz é sintética (marque como conteúdo alterado/sintético onde a plataforma pedir).
+> O `review.md` repete os avisos, e o roteiro é escrito por IA: confira os fatos antes de postar.
 
 ## Como a IA escolhe os cortes (e como melhorar)
 A escolha tem **duas passadas**:
@@ -187,17 +187,3 @@ pip install -e ".[dev]"
 pytest                                        # usa FFmpeg real em vídeo sintético; Whisper e Gemini são falsos
 ```
 `spikes/` guarda os testes de validação da Fase 0 (medem Whisper, tokens e timestamps do Gemini no seu PC).
-
-## Voz em português com o Chatterbox (alternativa ao GPT-SoVITS)
-
-O GPT-SoVITS v2 não aceita português. O [Chatterbox Multilingual](https://github.com/resemble-ai/chatterbox) lista `pt` entre os idiomas e clona voz a partir de um clipe de referência (licença MIT, segundo o README).
-Ele roda num ambiente separado (o projeto recomenda Python 3.11) e o DarkCNN fala com ele por HTTP:
-
-```
-conda create -yn chatterbox python=3.11 && conda activate chatterbox
-pip install chatterbox-tts
-python tools/chatterbox_server.py --port 9881 --device cpu
-```
-
-No `config.yaml`: `tts_backend: chatterbox`, `tts_url: http://127.0.0.1:9881` e, na voz, `lang: pt` + `ref_audio` (o `prompt_text` não é usado).
-Teste com `python -m darkcnn voices --say "testando a voz"`. A 1ª execução baixa vários GB. A velocidade em CPU não foi medida.

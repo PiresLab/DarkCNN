@@ -6,7 +6,7 @@ import pytest
 
 from conftest import make_video, needs_ffmpeg
 from darkcnn import narrate, script as S
-from darkcnn.config import Config, VoiceCfg
+from darkcnn.config import Config
 from darkcnn.gemini import GeminiClient
 from darkcnn.media import probe_duration, run, video_info
 from test_tts import FakeBackend as FakeTTS, make_wav
@@ -49,15 +49,15 @@ def fake_transcriber(script_lines, cfg):
             for k, tok in enumerate(toks):
                 words.append({"w": tok, "start": round(t + k * step, 3),
                               "end": round(t + (k + 1) * step - 0.02, 3), "p": 0.9})
-            t += span + cfg.pause_s + (cfg.countdown_s if ln.kind == "escolha" else 0.0)
+            # as linhas de um bloco são faladas juntas; só a pergunta (fim do bloco) é seguida de pausa
+            t += span + ((cfg.pause_s + cfg.countdown_s) if ln.kind == "escolha" else 0.0)
         return words
     return transcribe
 
 
 def narrate_cfg(tmp_path, **kw):
     base = dict(
-        voice="gumball", voices={"gumball": VoiceCfg(ref_audio=tmp_path / "ref.wav", prompt_text="oi")},
-        gameplay_dir=gameplay_dir(tmp_path), preset="ultrafast", seed=7, target_s=20,
+        tts_voice="Kore", gameplay_dir=gameplay_dir(tmp_path), preset="ultrafast", seed=7, target_s=20,
         workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out",
     )
     base.update(kw)
@@ -139,14 +139,18 @@ def test_narrate_end_to_end_with_choices_and_cache(tmp_path):
     assert len(mp4s) == 1 and mp4s[0].name.startswith("01_um-titulo-de-teste")
     info = video_info(mp4s[0])
     assert (info["width"], info["height"]) == (1080, 1920)
-    # duração = falas + pausa + contagem (a última linha não tem pausa depois)
-    esperado = sum(max(0.3, len(l.text.split()) * DUR_PER_WORD) for l in lines) + 0.3 + (0.3 + 3.0)
-    assert info["duration"] == pytest.approx(esperado, abs=0.5)
-    assert backend.calls == 1 and len(tts_backend.said) == 3
+    # 2 blocos: [fala + pergunta] e [comentário]; a pausa + a contagem vêm depois da pergunta
+    bloco1 = max(0.3, (len(lines[0].text.split()) + len(lines[1].text.split())) * DUR_PER_WORD)
+    bloco2 = max(0.3, len(lines[2].text.split()) * DUR_PER_WORD)
+    assert info["duration"] == pytest.approx(bloco1 + 0.3 + 3.0 + bloco2, abs=0.5)
+    assert backend.calls == 1 and len(tts_backend.said) == 2  # uma requisição de voz por bloco, não por linha
+    assert tts_backend.voices == ["Kore", "Kore"]
 
     data = json.loads((out / "scripts.json").read_text(encoding="utf-8"))[0]
-    assert data["title"] == "Um título de teste" and data["voice"] == "gumball"
+    assert data["title"] == "Um título de teste" and data["voice"] == "Kore"
     assert [l["kind"] for l in data["lines"]] == ["fala", "escolha", "fala"]
+    starts = [l["start"] for l in data["lines"]]
+    assert starts == sorted(starts) and starts[0] == 0.0 and starts[1] > 0  # a pergunta começa depois da fala anterior
     assert data["match"] == 1.0  # o Whisper falso confirma o roteiro inteiro
 
     ass = (cfg.workspace_dir / "narrate" / narrate.run_id(cfg) / "01" / "render" / "subs.ass").read_text("utf-8")
@@ -155,14 +159,14 @@ def test_narrate_end_to_end_with_choices_and_cache(tmp_path):
     assert "SEM DOR" in ass and "SEM MEDO" in ass
 
     text = review.read_text(encoding="utf-8")
-    assert "voz clonada de personagem" in text and "Um título de teste" in text
+    assert "a voz é sintética" in text and "personagem" not in text and "Um título de teste" in text
     assert "[Sem dor × Sem medo]" in text and "game" in text
 
     # 2ª execução: nada de Gemini, nada de TTS, nada de render
     mtime = mp4s[0].stat().st_mtime_ns
     narrate.run_narrate(cfg, client_factory=factory, backend=tts_backend,
                         transcriber=fake_transcriber(lines, cfg))
-    assert backend.calls == 1 and len(tts_backend.said) == 3
+    assert backend.calls == 1 and len(tts_backend.said) == 2
     assert mp4s[0].stat().st_mtime_ns == mtime
 
 
@@ -186,10 +190,51 @@ def test_narrate_two_videos_and_stale_cleanup(tmp_path):
     assert len(nomes) == 1 and nomes[0].startswith("01_")
 
 
-def test_narrate_requires_gameplay_dir_and_known_voice(tmp_path):
+def test_narrate_requires_gameplay_dir(tmp_path):
     with pytest.raises(ValueError, match="--gameplay-dir"):
         narrate.run_narrate(Config(workspace_dir=tmp_path / "ws"))
-    cfg = narrate_cfg(tmp_path, voice="nao_existe")
-    from darkcnn.tts import TTSError
-    with pytest.raises(TTSError, match="não está no config.yaml"):
-        narrate.run_narrate(cfg, client_factory=lambda: None, backend=FakeTTS())
+
+
+def test_old_character_voice_config_is_rejected():
+    for old in ({"voice": "gumball"}, {"voices": {}}, {"tts_backend": "gptsovits"}, {"tts_url": "http://x"}):
+        with pytest.raises(Exception, match="Extra inputs are not permitted"):
+            Config(**old)
+
+
+def test_make_blocks_closes_a_block_at_each_question():
+    L = S.Line
+    q = lambda t: L(text=t, kind="escolha", option_a="A", option_b="B")
+    s = script_of([L(text="a"), L(text="b"), q("c"), L(text="d"), q("e"), L(text="f")])
+    assert narrate.make_blocks(s) == [[0, 1, 2], [3, 4], [5]]
+    flat = script_of([L(text="a"), L(text="b"), L(text="c")])
+    assert narrate.make_blocks(flat) == [[0, 1, 2]]  # curiosidade/e-se = um bloco = uma requisição de voz
+
+
+def test_line_times_comes_from_the_aligned_words():
+    L = S.Line
+    s = script_of([L(text="um dois"), L(text="três quatro cinco", kind="escolha", option_a="A", option_b="B"),
+                   L(text="seis")])
+    blocks = narrate.make_blocks(s)
+    words = [{"w": w, "start": float(i), "end": i + 0.9, "p": 1} for i, w in
+             enumerate("um dois três quatro cinco seis".split())]
+    spokens = [narrate.tts.Spoken(0, "", Path("a.wav"), 0.0, 5.0, 3.0),
+               narrate.tts.Spoken(1, "", Path("b.wav"), 8.0, 9.0, 0.0)]
+    times = narrate.line_times(s, blocks, words, spokens)
+    assert times[0] == (0.0, 1.9)
+    assert times[1] == (2.0, 5.0)  # a pergunta começa na 1ª palavra dela e vai até o fim do áudio do bloco
+    assert times[2][0] == 5.0
+
+
+@needs_ffmpeg
+def test_each_video_draws_its_voice_from_the_pool(tmp_path):
+    a = script_of([S.Line(text="primeiro roteiro bem curto aqui")])
+    b = script_of([S.Line(text="segundo roteiro diferente do outro")])
+    b.title = "Outro titulo"
+    cfg = narrate_cfg(tmp_path, count=2, game_volume=0.0, tts_voices_pool=["Puck", "Charon", "Fenrir"])
+    backend = ScriptBackend([a, b])
+    factory = lambda: GeminiClient(backend, cfg.workspace_dir / "u.json", 40, sleep=lambda s: None)
+    fake = FakeTTS(DUR_PER_WORD)
+    review = narrate.run_narrate(cfg, client_factory=factory, backend=fake, transcriber=lambda w, c: [])
+    assert len(fake.voices) == 2 and set(fake.voices) <= {"Puck", "Charon", "Fenrir"}
+    data = json.loads((review.parent / "scripts.json").read_text(encoding="utf-8"))
+    assert [v["voice"] for v in data] == fake.voices

@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--topic", help="tema (sem isso, a IA escolhe)")
     nr.add_argument("--count", dest="count", type=int, help="quantos vídeos gerar (padrão 1)")
     nr.add_argument("--target-s", dest="target_s", type=float, help="duração alvo da narração (padrão 45)")
-    nr.add_argument("--voice", help="nome de uma voz do config.yaml")
+    nr.add_argument("--voice", dest="tts_voice", help="voz do Gemini (ex.: Kore, Puck, Charon); `darkcnn voices` lista")
     nr.add_argument("--gameplay-dir", dest="gameplay_dir", type=Path, help="pasta com os vídeos de fundo")
     nr.add_argument("--game-volume", dest="game_volume", type=float, help="volume da gameplay (0 = mudo)")
     nr.add_argument("--seed", type=int, help="fixa o sorteio da gameplay")
@@ -77,10 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--output", dest="output_dir", type=Path)
     nr.add_argument("--force", action="store_true", help="ignora o cache de roteiro")
 
-    vc = sub.add_parser("voices", help="lista as vozes do config e testa uma frase (não usa o Gemini)")
+    vc = sub.add_parser("voices", help="vozes do Gemini: ouve uma frase de teste e lista os modelos TTS")
     vc.add_argument("--config", type=Path)
     vc.add_argument("--say", help="frase de teste para sintetizar")
-    vc.add_argument("--voice", help="qual voz testar")
+    vc.add_argument("--voice", dest="tts_voice", help="qual voz testar")
+    vc.add_argument("--all", action="store_true", help="com --say: uma amostra de cada voz do pool (ou de 4 vozes)")
+    vc.add_argument("--models", action="store_true", help="lista os modelos TTS que a sua chave enxerga")
     vc.add_argument("--output", dest="output_dir", type=Path)
     vc.add_argument("--workspace", dest="workspace_dir", type=Path)
 
@@ -97,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_dotenv()
     overrides = {k: v for k, v in vars(args).items()
-                 if k not in ("cmd", "input", "config", "force", "say")}
+                 if k not in ("cmd", "input", "config", "force", "say", "all", "models")}
     cfg = load_config(args.config, overrides)
     if getattr(args, "input", None) and not is_url(args.input) and getattr(args, "source", None) \
             and is_url(args.source):
@@ -115,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "voices":
             from .voices import voices_report
-            print("\n" + voices_report(cfg, args.say))
+            print("\n" + voices_report(cfg, args.say, all_voices=args.all, models=args.models))
             return 0
         if args.cmd == "shots":
             print("\n" + shots_report(args.input, cfg))

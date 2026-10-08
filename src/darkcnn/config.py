@@ -19,21 +19,6 @@ class WatermarkCfg(BaseModel):
     y: str = "120"  # acima do título (layout 'titled'), fora da zona de UI das plataformas
 
 
-class VoiceCfg(BaseModel):
-    """Uma voz do GPT-SoVITS: áudio de referência (3-10 s) + a transcrição exata dele."""
-    model_config = ConfigDict(extra="forbid")
-
-    ref_audio: Path  # WAV de referência; o caminho é lido pelo SERVIDOR do GPT-SoVITS
-    prompt_text: str = ""  # o que é falado no áudio de referência (melhora muito a imitação)
-    lang: str = "pt"  # idioma do texto a falar (o que o servidor aceita depende da versão do GPT-SoVITS)
-    prompt_lang: str = ""  # idioma do áudio de referência; vazio = o mesmo de `lang`
-    speed: float = Field(1.0, gt=0.1, le=3.0)
-    gpt_weights: Path | None = None  # modelos próprios dessa voz (opcional)
-    sovits_weights: Path | None = None
-    exaggeration: float = Field(0.5, ge=0.0, le=2.0)  # só Chatterbox: expressividade
-    cfg_weight: float = Field(0.5, ge=0.0, le=1.0)  # só Chatterbox: 0 reduz o sotaque da referência
-
-
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -62,12 +47,17 @@ class Config(BaseModel):
     topic: str | None = None  # None = a IA escolhe o tema
     count: int = Field(1, ge=1, le=10)  # quantos vídeos por execução
     target_s: float = Field(45.0, gt=5)  # duração alvo da narração
-    voice: str = "default"  # nome de uma voz em `voices`
-    voices: dict[str, VoiceCfg] = {}
-    tts_backend: Literal["gptsovits", "chatterbox"] = "gptsovits"
-    tts_url: str = "http://127.0.0.1:9880"
-    tts_timeout_s: float = 600.0  # síntese em CPU é lenta
-    tts_split_method: str = "cut5"  # como o GPT-SoVITS quebra o texto (ver text_segmentation_method.py)
+    # TTS do Gemini: o ID do modelo e os nomes de voz mudam; `darkcnn voices --models` lista o que o projeto enxerga
+    tts_model: str = "gemini-2.5-flash-preview-tts"
+    tts_voice: str = "Kore"  # voz prebuilt do Gemini
+    tts_voices_pool: list[str] = []  # se preenchido, cada vídeo sorteia uma voz daqui (varia o canal)
+    tts_style: str = ("Narre em português do Brasil, em voz natural e envolvente, no ritmo de um vídeo curto: "
+                      "frases fluidas, pausas curtas nas vírgulas e ênfase nas frases de efeito. "
+                      "Leia somente o texto abaixo, sem acrescentar nada.")
+    tts_speed: float = Field(1.0, ge=0.8, le=1.5)  # aplicado depois, sem mudar o tom (atempo do FFmpeg)
+    tts_min_interval_s: float = Field(7.0, ge=0.0)  # espaço entre chamadas (o TTS tem limite por minuto)
+    tts_retries: int = Field(3, ge=0)
+    tts_timeout_s: float = 180.0
     gameplay_dir: Path | None = None  # pasta com as gameplays de fundo
     game_volume: float = Field(0.06, ge=0.0, le=1.0)  # volume do áudio da gameplay (0 = mudo)
     pause_s: float = Field(0.35, ge=0.0)  # silêncio entre as linhas do roteiro

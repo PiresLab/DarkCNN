@@ -17,8 +17,8 @@ COMO ESCREVER PARA SER OUVIDO
 
 REGRAS TÉCNICAS
 - O roteiro inteiro deve levar cerca de {target_s:.0f} segundos falados: use no total aproximadamente {target_words} palavras. Fique perto disso.
-- Divida o roteiro em linhas (`lines`): cada linha é uma frase ou duas, do tamanho de um fôlego. A voz faz uma pausa curta entre as linhas.
-- `text` é EXATAMENTE o que será falado em voz alta. Escreva números por extenso ("vinte e três", não "23"), sem emoji, sem "#", sem asterisco, sem parênteses com instrução de atuação.
+- Divida o roteiro em linhas (`lines`): cada linha é uma frase ou duas, do tamanho de um fôlego. As linhas seguidas são faladas juntas, em uma só respiração contínua; a pontuação (vírgula, ponto, reticências) é o que dá o ritmo da voz.
+- `text` é EXATAMENTE o que será falado em voz alta. Escreva números por extenso ("vinte e três", não "23"), sem emoji, sem "#", sem asterisco, sem parênteses com instrução de atuação, sem siglas difíceis de ler em voz alta (escreva por extenso ou troque por uma palavra simples) e sem aspas ou travessões no meio da frase.
 - `title`: título curto e chamativo para o post (até 60 caracteres).
 - `topic`: o assunto do roteiro em poucas palavras.
 

@@ -1,13 +1,11 @@
-import functools
-import http.server
-import json
-import threading
+import random
+from types import SimpleNamespace
 
 import pytest
 
 from conftest import needs_ffmpeg
 from darkcnn import tts
-from darkcnn.config import Config, VoiceCfg
+from darkcnn.config import Config
 from darkcnn.media import probe_duration, run
 
 
@@ -18,55 +16,49 @@ def make_wav(path, dur=0.5, freq=440):
     return path
 
 
-def cfg_with_voice(tmp_path, **kw):
-    base = dict(voice="gumball", voices={"gumball": VoiceCfg(ref_audio=tmp_path / "ref.wav",
-                                                             prompt_text="olá", lang="pt")})
-    base.update(kw)
-    return Config(**base)
+def test_pick_voice_uses_the_pool_or_the_default():
+    assert tts.pick_voice(Config(tts_voice="Kore"), random.Random(1)) == "Kore"
+    pool = Config(tts_voices_pool=["Puck", "Charon", "Fenrir"])
+    seen = {tts.pick_voice(pool, random.Random(i)) for i in range(30)}
+    assert seen == {"Puck", "Charon", "Fenrir"}
+    assert tts.pick_voice(pool, random.Random(5)) == tts.pick_voice(pool, random.Random(5))  # reprodutível
 
 
-def test_get_voice_errors_point_to_the_config(tmp_path):
-    with pytest.raises(tts.TTSError, match="não está no config.yaml"):
-        tts.get_voice(Config(voice="mordecai"))
-    cfg = cfg_with_voice(tmp_path)
-    assert tts.get_voice(cfg).prompt_text == "olá"
-    with pytest.raises(tts.TTSError, match="gumball, mordecai|mordecai"):
-        tts.get_voice(cfg.model_copy(update={"voice": "nao_existe",
-                                             "voices": {**cfg.voices, "mordecai": cfg.voices["gumball"]}}))
-
-
-def test_line_key_depends_on_text_and_voice_not_on_position(tmp_path):
-    cfg = cfg_with_voice(tmp_path)
-    v = tts.get_voice(cfg)
-    k = tts.line_key("olá mundo", "gumball", v, cfg)
-    assert k == tts.line_key("olá mundo", "gumball", v, cfg)
-    assert k != tts.line_key("outro texto", "gumball", v, cfg)
-    assert k != tts.line_key("olá mundo", "mordecai", v, cfg)
-    assert k != tts.line_key("olá mundo", "gumball", v.model_copy(update={"speed": 1.2}), cfg)
+def test_line_key_depends_on_text_voice_style_and_speed_not_on_position():
+    cfg = Config()
+    k = tts.line_key("olá mundo", "Kore", cfg)
+    assert k == tts.line_key("olá mundo", "Kore", cfg)
+    assert k != tts.line_key("outro texto", "Kore", cfg)
+    assert k != tts.line_key("olá mundo", "Puck", cfg)
+    assert k != tts.line_key("olá mundo", "Kore", cfg.model_copy(update={"tts_speed": 1.2}))
+    assert k != tts.line_key("olá mundo", "Kore", cfg.model_copy(update={"tts_style": "grite"}))
+    assert k != tts.line_key("olá mundo", "Kore", cfg.model_copy(update={"tts_model": "outro-modelo"}))
 
 
 class FakeBackend:
     def __init__(self, dur_per_word=0.4):
         self.said: list[str] = []
+        self.voices: list[str] = []
         self.dur_per_word = dur_per_word
 
     def say(self, text, voice, dest):
         self.said.append(text)
+        self.voices.append(voice)
         make_wav(dest, dur=max(0.3, len(text.split()) * self.dur_per_word))
 
 
 @needs_ffmpeg
 def test_synthesize_caches_by_content(tmp_path):
-    cfg = cfg_with_voice(tmp_path)
+    cfg = Config()
     b = FakeBackend()
-    wavs, made = tts.synthesize(["uma frase", "outra frase"], cfg, b, tmp_path / "voice")
+    wavs, made = tts.synthesize(["uma frase", "outra frase"], "Kore", cfg, b, tmp_path / "voice")
     assert made == 2 and len(wavs) == 2 and all(w.exists() for w in wavs)
 
-    wavs2, made2 = tts.synthesize(["uma frase", "MUDOU aqui"], cfg, b, tmp_path / "voice")
+    wavs2, made2 = tts.synthesize(["uma frase", "MUDOU aqui"], "Kore", cfg, b, tmp_path / "voice")
     assert made2 == 1 and wavs2[0] == wavs[0]  # só a linha alterada foi sintetizada
     assert b.said == ["uma frase", "outra frase", "MUDOU aqui"]
     # a mesma frase em duas posições usa o mesmo arquivo
-    rep, made3 = tts.synthesize(["uma frase", "uma frase"], cfg, b, tmp_path / "voice")
+    rep, made3 = tts.synthesize(["uma frase", "uma frase"], "Kore", cfg, b, tmp_path / "voice")
     assert made3 == 0 and rep[0] == rep[1]
 
 
@@ -85,129 +77,117 @@ def test_build_track_without_lines(tmp_path):
         tts.build_track([], tmp_path / "x.wav")
 
 
-# ---------------------------------------------------------------- servidor que imita o GPT-SoVITS
-class FakeServer:
-    """Mínimo da API do GPT-SoVITS: POST /tts devolve WAV; modos de erro para os testes."""
+# ---------------------------------------------------------------- Gemini TTS (cliente falso)
+class FakeGenaiClient:
+    """Imita `client.models.generate_content` para o TTS: devolve PCM, ou erros programados."""
 
-    def __init__(self, wav: bytes, mode="ok"):
-        self.wav, self.mode, self.payloads, self.weights = wav, mode, [], []
-        outer = self
+    def __init__(self, script=None, pcm_seconds=1.0, mime="audio/L16;codec=pcm;rate=24000"):
+        self.script = list(script or [])
+        self.calls: list[dict] = []
+        self.pcm = b"\x00\x01" * int(24000 * pcm_seconds)
+        self.mime = mime
+        self.models = SimpleNamespace(generate_content=self._gen)
 
-        class H(http.server.BaseHTTPRequestHandler):
-            def log_message(self, *a):
-                pass
+    def _gen(self, model, contents, config):
+        self.calls.append({"model": model, "contents": contents, "config": config})
+        step = self.script.pop(0) if self.script else "ok"
+        if isinstance(step, Exception):
+            raise step
+        if step == "sem_audio":
+            part = SimpleNamespace(inline_data=None, text="desculpe")
+            return SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]),
+                                                              finish_reason="OTHER")])
+        part = SimpleNamespace(inline_data=SimpleNamespace(data=self.pcm, mime_type=self.mime))
+        return SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))])
 
-            def do_GET(self):
-                outer.weights.append(self.path)
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"message":"ok"}')
 
-            def do_POST(self):
-                body = self.rfile.read(int(self.headers["Content-Length"]))
-                outer.payloads.append(json.loads(body))
-                if outer.mode == "erro":
-                    self.send_response(400)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write('{"message":"ref_audio_path não existe"}'.encode())
-                    return
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"NAO E WAV" if outer.mode == "lixo" else outer.wav)
+class ApiErr(Exception):
+    def __init__(self, code, message="x"):
+        super().__init__(message)
+        self.code, self.message = code, message
 
-        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
-        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
 
-    @property
-    def url(self):
-        return f"http://127.0.0.1:{self.srv.server_port}"
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        self.srv.shutdown()
+def gemini_backend(client, **kw):
+    sleeps: list[float] = []
+    clock = [0.0]
+    kw.setdefault("min_interval_s", 0.0)
+    b = tts.GeminiTTSBackend("chave", "modelo-tts", style="Narre bem.", client=client,
+                             sleep=lambda s: (sleeps.append(s), clock.__setitem__(0, clock[0] + s)),
+                             clock=lambda: clock[0], backoff_s=10.0, **kw)
+    return b, sleeps
 
 
 @needs_ffmpeg
-def test_gptsovits_backend_sends_the_right_payload_and_saves_the_wav(tmp_path, monkeypatch):
-    for v in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY"):
-        monkeypatch.delenv(v, raising=False)
-    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
-    wav = make_wav(tmp_path / "ref.wav", dur=0.6).read_bytes()
-    with FakeServer(wav) as srv:
-        cfg = cfg_with_voice(tmp_path, tts_url=srv.url, tts_split_method="cut3")
-        b = tts.GPTSoVITSBackend(cfg.tts_url, 30, cfg.tts_split_method)
-        dest = tmp_path / "out" / "fala.wav"
-        b.say("bom dia", tts.get_voice(cfg), dest)
-        assert dest.exists() and probe_duration(dest) == pytest.approx(0.6, abs=0.05)
-        p = srv.payloads[0]
-        assert p["text"] == "bom dia" and p["text_lang"] == "pt" and p["prompt_lang"] == "pt"
-        assert p["prompt_text"] == "olá" and p["ref_audio_path"].endswith("ref.wav")
-        assert p["media_type"] == "wav" and p["streaming_mode"] is False and p["text_split_method"] == "cut3"
-        assert p["speed_factor"] == 1.0
+def test_gemini_backend_saves_pcm_as_24k_mono_wav_with_voice_and_style(tmp_path):
+    client = FakeGenaiClient(pcm_seconds=1.0)
+    b, _ = gemini_backend(client)
+    dest = tmp_path / "o" / "fala.wav"
+    b.say("bom dia pessoal", "Puck", dest)
+    assert probe_duration(dest) == pytest.approx(1.0, abs=0.02)
+    call = client.calls[0]
+    assert call["model"] == "modelo-tts"
+    assert call["contents"] == "Narre bem.\n\nbom dia pessoal"
+    cfg = call["config"]
+    assert list(cfg.response_modalities) == ["AUDIO"]
+    assert cfg.speech_config.voice_config.prebuilt_voice_config.voice_name == "Puck"
 
 
 @needs_ffmpeg
-def test_gptsovits_backend_loads_custom_weights_once(tmp_path, monkeypatch):
-    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
-    wav = make_wav(tmp_path / "ref.wav", dur=0.3).read_bytes()
-    with FakeServer(wav) as srv:
-        voice = VoiceCfg(ref_audio=tmp_path / "ref.wav", gpt_weights="g.ckpt", sovits_weights="s.pth")
-        b = tts.GPTSoVITSBackend(srv.url, 30)
-        b.say("um", voice, tmp_path / "a.wav")
-        b.say("dois", voice, tmp_path / "b.wav")
-        assert len(srv.weights) == 2 and "set_gpt_weights" in srv.weights[0]  # carregado uma vez só
-        assert "set_sovits_weights" in srv.weights[1]
+def test_gemini_backend_speed_uses_atempo(tmp_path):
+    b, _ = gemini_backend(FakeGenaiClient(pcm_seconds=2.0), speed=1.25)
+    dest = tmp_path / "fala.wav"
+    b.say("texto", "Kore", dest)
+    assert probe_duration(dest) == pytest.approx(1.6, abs=0.05)
 
 
-def test_backend_errors_are_readable(tmp_path, monkeypatch):
-    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
-    voice = VoiceCfg(ref_audio=tmp_path / "ref.wav")
-    with FakeServer(b"", mode="erro") as srv:
-        with pytest.raises(tts.TTSError, match="recusou a síntese.*ref_audio_path"):
-            tts.GPTSoVITSBackend(srv.url, 10).say("oi", voice, tmp_path / "x.wav")
-    with FakeServer(b"", mode="lixo") as srv:
-        with pytest.raises(tts.TTSError, match="não mandou um WAV"):
-            tts.GPTSoVITSBackend(srv.url, 10).say("oi", voice, tmp_path / "x.wav")
-    # servidor fora do ar: a mensagem ensina como subir
-    with pytest.raises(tts.TTSError, match="Ele está rodando.*api_v2.py"):
-        tts.GPTSoVITSBackend("http://127.0.0.1:1", 2).say("oi", voice, tmp_path / "x.wav")
+@needs_ffmpeg
+def test_gemini_backend_reads_the_sample_rate_from_the_mime_type(tmp_path):
+    b, _ = gemini_backend(FakeGenaiClient(pcm_seconds=1.0, mime="audio/L16;rate=48000"))
+    b.say("texto", "Kore", tmp_path / "fala.wav")
+    assert probe_duration(tmp_path / "fala.wav") == pytest.approx(0.5, abs=0.02)  # mesmos bytes, 2x a taxa
 
 
-def test_chatterbox_backend_sends_json_and_saves_wav(tmp_path):
-    seen = {}
-
-    class H(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):
-            seen.update(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-            body = b"RIFF" + b"\0" * 40
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *a):
-            pass
-
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:
-        backend = tts.ChatterboxBackend(f"http://127.0.0.1:{srv.server_port}")
-        voice = VoiceCfg(ref_audio=tmp_path / "r.wav", lang="pt", exaggeration=0.7)
-        dest = tmp_path / "o.wav"
-        backend.say("olá", voice, dest)
-    finally:
-        srv.shutdown()
-    assert seen["language_id"] == "pt" and seen["exaggeration"] == 0.7 and seen["text"] == "olá"
-    assert dest.read_bytes()[:4] == b"RIFF"
+@needs_ffmpeg
+def test_gemini_backend_retries_transient_errors_and_missing_audio(tmp_path):
+    client = FakeGenaiClient(script=[ApiErr(429, "cota"), "sem_audio", "ok"])
+    b, sleeps = gemini_backend(client)
+    b.say("texto", "Kore", tmp_path / "fala.wav")
+    assert len(client.calls) == 3 and sleeps == [10.0, 20.0]  # backoff exponencial
+    assert (tmp_path / "fala.wav").exists()
 
 
-def test_chatterbox_backend_selected_and_server_down_is_readable(tmp_path):
-    cfg = Config(tts_backend="chatterbox", tts_url="http://127.0.0.1:1")
-    b = tts.make_backend(cfg)
-    assert isinstance(b, tts.ChatterboxBackend)
-    with pytest.raises(tts.TTSError, match="chatterbox_server"):
-        b.say("x", VoiceCfg(ref_audio=tmp_path / "r.wav"), tmp_path / "o.wav")
+def test_gemini_backend_gives_up_with_a_readable_error(tmp_path):
+    client = FakeGenaiClient(script=["sem_audio"] * 5)
+    b, _ = gemini_backend(client, retries=2)
+    with pytest.raises(tts.TTSError, match="falhou após 3 tentativas.*não devolveu áudio"):
+        b.say("texto", "Kore", tmp_path / "fala.wav")
+    assert len(client.calls) == 3
+
+
+def test_gemini_backend_does_not_retry_a_rejected_request(tmp_path):
+    client = FakeGenaiClient(script=[ApiErr(404, "model not found")])
+    b, sleeps = gemini_backend(client)
+    with pytest.raises(tts.TTSError, match="recusou o pedido \\(404\\).*voices --models"):
+        b.say("texto", "Kore", tmp_path / "fala.wav")
+    assert len(client.calls) == 1 and sleeps == []
+
+
+@needs_ffmpeg
+def test_gemini_backend_spaces_the_calls(tmp_path):
+    client = FakeGenaiClient()
+    b, sleeps = gemini_backend(client, min_interval_s=7.0)
+    b.say("um", "Kore", tmp_path / "a.wav")
+    b.say("dois", "Kore", tmp_path / "b.wav")
+    assert sleeps == [7.0]  # só a 2ª chamada espera
+
+
+def test_missing_api_key_is_a_clear_error(tmp_path):
+    b = tts.GeminiTTSBackend(None, "m")
+    with pytest.raises(tts.TTSError, match="GEMINI_API_KEY"):
+        b.say("x", "Kore", tmp_path / "a.wav")
+
+
+def test_make_backend_uses_the_config(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    b = tts.make_backend(Config(tts_model="m", tts_speed=1.1, tts_min_interval_s=3))
+    assert isinstance(b, tts.GeminiTTSBackend) and b.model == "m" and b.speed == 1.1 and b.min_interval_s == 3
