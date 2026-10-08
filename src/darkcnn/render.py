@@ -107,7 +107,7 @@ def narration_key(gameplay: Path, offset: float, loop: bool, words: list[dict], 
     return cache.key_of(
         v=1, game=str(gameplay), offset=round(offset, 3), loop=loop, dur=round(dur, 3),
         words=words, choices=choices, text_mode=cfg.text_mode, layout=cfg.layout, font=cfg.font,
-        preset=cfg.preset, crf=cfg.crf, game_volume=cfg.game_volume, wm=wm_sig,
+        preset=cfg.preset, crf=cfg.crf, game_volume=cfg.game_volume, tick=cfg.tick_volume, wm=wm_sig,
         wm_cfg=cfg.watermark.model_dump(mode="json", exclude={"path"}),
     )
 

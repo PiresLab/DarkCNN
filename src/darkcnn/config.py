@@ -62,6 +62,7 @@ class Config(BaseModel):
     game_volume: float = Field(0.06, ge=0.0, le=1.0)  # volume do áudio da gameplay (0 = mudo)
     pause_s: float = Field(0.35, ge=0.0)  # silêncio entre as linhas do roteiro
     countdown_s: float = Field(3.0, ge=0.0)  # tempo de decisão após uma pergunta "você prefere"
+    tick_volume: float = Field(0.5, ge=0.0, le=1.0)  # tic-tac de relógio durante a contagem (0 desliga)
     seed: int | None = None  # fixa a escolha da gameplay (reprodutível)
     theme_min_fit: int = Field(5, ge=1, le=10)  # abaixo disso o momento não combina com o tema e é descartado
 

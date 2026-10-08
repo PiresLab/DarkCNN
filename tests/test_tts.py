@@ -191,3 +191,71 @@ def test_make_backend_uses_the_config(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     b = tts.make_backend(Config(tts_model="m", tts_speed=1.1, tts_min_interval_s=3))
     assert isinstance(b, tts.GeminiTTSBackend) and b.model == "m" and b.speed == 1.1 and b.min_interval_s == 3
+
+
+# ---------------------------------------------------------------- tic-tac da contagem
+CH = [{"a": "A", "b": "B", "start": 1.0, "end": 3.0, "countdown": 3.0}]
+
+
+def _energy(x, a, b, sr=tts.TRACK_SR):
+    import numpy as np
+    return float(np.sum(np.abs(x[int(a * sr):int(b * sr)])))
+
+
+def test_tick_audio_only_sounds_inside_the_countdown():
+    x = tts.tick_audio(CH, 8.0, 0.5)
+    assert x.size == 8 * tts.TRACK_SR
+    assert _energy(x, 0, 3.0) == 0 and _energy(x, 6.2, 8.0) == 0  # antes e depois: silêncio
+    # 3 s de contagem = 6 estalos (tic, tac, tic, tac, tic, tac), um a cada meio segundo
+    for k in range(6):
+        t = 3.0 + k * 0.5
+        assert _energy(x, t, t + 0.09) > 0, f"faltou o estalo {k} em {t}s"
+        assert _energy(x, t + 0.15, t + 0.5) == 0  # entre um estalo e outro, silêncio
+
+
+def test_tick_audio_volume_scales_the_peak_and_zero_is_silent():
+    import numpy as np
+    assert np.max(np.abs(tts.tick_audio(CH, 8.0, 1.0))) == pytest.approx(0.8, abs=0.01)
+    assert np.max(np.abs(tts.tick_audio(CH, 8.0, 0.25))) == pytest.approx(0.2, abs=0.01)
+    assert not np.any(tts.tick_audio(CH, 8.0, 0.0))
+
+
+def test_tic_and_tac_have_different_pitch():
+    import numpy as np
+    x = tts.tick_audio(CH, 8.0, 1.0)
+    sr = tts.TRACK_SR
+
+    def peak_hz(t):
+        seg = x[int(t * sr):int((t + 0.09) * sr)]
+        spec = np.abs(np.fft.rfft(seg * np.hanning(seg.size)))
+        return float(np.fft.rfftfreq(seg.size, 1 / sr)[int(np.argmax(spec))])
+    tic, tac = peak_hz(3.0), peak_hz(3.5)
+    assert 2000 < tic < 2600 and 1200 < tac < 1800 and tic > tac * 1.3  # tic agudo, tac grave
+
+
+@needs_ffmpeg
+def test_mix_ticks_keeps_the_voice_and_the_duration(tmp_path):
+    import numpy as np
+    import wave
+    voice = tmp_path / "voice.wav"
+    spokens = tts.place([make_wav(tmp_path / "a.wav", dur=3.0), make_wav(tmp_path / "b.wav", dur=2.0)], [3.35, 0.0])
+    tts.build_track(spokens, voice)
+    out = tts.mix_ticks(voice, CH, 0.5, tmp_path / "mixed.wav")
+    assert out != voice and probe_duration(out) == pytest.approx(probe_duration(voice), abs=0.02)
+
+    def pcm(p):
+        with wave.open(str(p), "rb") as wf:
+            return np.frombuffer(wf.readframes(wf.getnframes()), dtype="<i2").astype(float)
+    a, b = pcm(voice), pcm(out)
+    sr = tts.TRACK_SR
+    assert np.array_equal(a[: 3 * sr], b[: 3 * sr])  # a fala antes da contagem não muda
+    assert not np.array_equal(a[3 * sr:int(4.5 * sr)], b[3 * sr:int(4.5 * sr)])  # a contagem ganhou o tic-tac
+    assert np.max(np.abs(b)) <= 32767
+
+
+def test_mix_ticks_is_a_no_op_without_countdown_or_volume(tmp_path):
+    track = tmp_path / "voice.wav"
+    track.write_bytes(b"x")
+    assert tts.mix_ticks(track, CH, 0.0, tmp_path / "o.wav") == track
+    assert tts.mix_ticks(track, [], 0.5, tmp_path / "o.wav") == track
+    assert tts.mix_ticks(track, [{**CH[0], "countdown": 0.0}], 0.5, tmp_path / "o.wav") == track

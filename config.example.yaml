@@ -43,6 +43,7 @@ watermark:
 # game_volume: 0.06                   # volume do áudio da gameplay (0 = mudo)
 # target_s: 45                        # duração alvo da narração
 # countdown_s: 3                      # tempo de decisão no formato "você prefere"
+# tick_volume: 0.5                    # tic-tac de relógio durante a contagem (0 desliga)
 # pause_s: 0.35                       # silêncio entre os blocos de voz
 # tts_model: gemini-2.5-flash-preview-tts   # confira com `darkcnn voices --models` (IDs de preview mudam)
 # tts_voice: Kore                     # voz do Gemini (ouça com `darkcnn voices --say "oi" --all`)

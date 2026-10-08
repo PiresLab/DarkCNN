@@ -315,3 +315,38 @@ def test_pick_playable_gives_a_clear_error_when_everything_is_corrupt(tmp_path, 
     monkeypatch.setattr(narrate, "playable", lambda *a: False)
     with pytest.raises(RuntimeError, match="corrompido.*-c copy"):
         narrate.pick_playable(files, 5.0, random.Random(0), attempts=3)
+
+
+@needs_ffmpeg
+def test_choice_video_has_the_clock_ticking_during_the_countdown(tmp_path):
+    import numpy as np
+    lines = [S.Line(text="você prefere nunca mais sentir dor ou nunca mais sentir medo", kind="escolha",
+                    option_a="Sem dor", option_b="Sem medo"),
+             S.Line(text="pensa bem antes de decidir")]
+    sc = script_of(lines)
+    out = {}
+    for vol in (0.5, 0.0):
+        base = tmp_path / f"v{vol}"
+        base.mkdir()
+        cfg = narrate_cfg(base, count=1, narrate_format="voce-prefere", countdown_s=3.0,
+                          pause_s=0.3, game_volume=0.0, tick_volume=vol)
+        backend = ScriptBackend([sc])
+        factory = lambda cfg=cfg, backend=backend: GeminiClient(backend, cfg.workspace_dir / "u.json", 40,
+                                                                 sleep=lambda s: None)
+        review = narrate.run_narrate(cfg, client_factory=factory, backend=FakeTTS(DUR_PER_WORD),
+                                     transcriber=fake_transcriber(lines, cfg))
+        mp4 = next(review.parent.glob("*.mp4"))
+        wav = tmp_path / f"a{vol}.wav"
+        run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(mp4), "-vn", "-ac", "1",
+             "-ar", "44100", str(wav)])
+        import wave
+        with wave.open(str(wav), "rb") as wf:
+            out[vol] = np.frombuffer(wf.readframes(wf.getnframes()), dtype="<i2").astype(float)
+    voice_end = len(lines[0].text.split()) * DUR_PER_WORD  # a pergunta termina aqui; a contagem começa
+    sr = 44100
+    n = min(out[0.5].size, out[0.0].size)
+    diff = np.abs(out[0.5][:n] - out[0.0][:n])
+    inside = diff[int((voice_end + 0.05) * sr):int((voice_end + 3.0) * sr)]
+    before = diff[: int((voice_end - 0.2) * sr)]
+    assert inside.max() > 800, "o tic-tac não apareceu durante a contagem"
+    assert before.max() < 800, "o tic-tac vazou para antes da contagem"

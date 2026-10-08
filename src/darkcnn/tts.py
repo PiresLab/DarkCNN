@@ -227,3 +227,66 @@ def build_track(spokens: list[Spoken], dest: Path) -> float:
             "-ac", "1", str(dest)]
     run(cmd)
     return probe_duration(dest)
+
+
+# ---------------------------------------------------------------- tic-tac da contagem
+TICK_STEP_S = 0.5  # um tic e um tac por segundo, como um relógio de parede
+
+
+def _click(freq: float, decay: float, sr: int, noise: float = 0.35, length_s: float = 0.09):
+    """Um estalo curto: senoide que morre rápido + um pouco de ruído para soar 'madeira', não 'bipe'."""
+    import numpy as np
+
+    t = np.arange(int(sr * length_s)) / sr
+    rng = np.random.default_rng(7)  # semente fixa: o mesmo som em toda execução (e o render faz cache)
+    body = (1 - noise) * np.sin(2 * np.pi * freq * t) + noise * (rng.random(t.size) * 2 - 1)
+    return body * np.exp(-t * decay)
+
+
+def tick_audio(choices: list[dict], total_s: float, volume: float, sr: int = TRACK_SR):
+    """Trilha de tic-tac, do tamanho do vídeo, com sons só dentro da contagem de cada pergunta.
+    `choices`: {end, countdown}. Devolve um array float em [-1, 1]."""
+    import numpy as np
+
+    out = np.zeros(int(round(total_s * sr)) + sr, dtype=np.float64)
+    tic, tac = _click(2300, 75, sr), _click(1500, 65, sr)
+    for c in choices:
+        n = int(round(c["countdown"] / TICK_STEP_S))
+        for k in range(n):
+            snd = tic if k % 2 == 0 else tac
+            i = int(round((c["end"] + k * TICK_STEP_S) * sr))
+            if i >= out.size:
+                break
+            seg = snd[: out.size - i]
+            out[i:i + seg.size] += seg
+    peak = float(np.max(np.abs(out))) if out.size else 0.0
+    if peak > 0:
+        out *= min(1.0, max(0.0, volume)) * 0.8 / peak
+    return out[: int(round(total_s * sr))]
+
+
+def mix_ticks(track: Path, choices: list[dict], volume: float, dest: Path) -> Path:
+    """Soma o tic-tac à trilha de voz (WAV PCM 16 bits mono) e grava em `dest`. Sem escolhas ou volume 0,
+    devolve a própria trilha (nada a fazer)."""
+    if volume <= 0 or not any(c.get("countdown", 0) > 0 for c in choices):
+        return track
+    import numpy as np
+
+    with wave.open(str(track), "rb") as wf:
+        sr, width, ch = wf.getframerate(), wf.getsampwidth(), wf.getnchannels()
+        raw = wf.readframes(wf.getnframes())
+    if width != 2 or ch != 1:
+        raise TTSError("a trilha de voz precisa ser PCM 16 bits mono para receber o tic-tac")
+    voice = np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0  # mesma escala na ida e na volta
+    ticks = tick_audio(choices, voice.size / sr, volume, sr)
+    n = min(voice.size, ticks.size)
+    mixed = voice.copy()
+    mixed[:n] += ticks[:n]
+    pcm = np.clip(np.rint(mixed * 32768.0), -32768, 32767).astype("<i2")  # trechos sem tic-tac voltam idênticos
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(dest), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(pcm.tobytes())
+    return dest

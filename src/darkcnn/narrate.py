@@ -182,11 +182,12 @@ def build_one(s: scriptlib.Script, idx: int, cfg: Config, backend: tts.Backend, 
     times = line_times(s, blocks, words, spokens)
     choices = [{"a": ln.option_a, "b": ln.option_b, "start": t0, "end": t1, "countdown": cfg.countdown_s}
                for ln, (t0, t1) in zip(s.lines, times) if ln.kind == "escolha"]
+    voice_track = tts.mix_ticks(track, choices, cfg.tick_volume, work / "voice_ticks.wav")  # só depois do Whisper
     game, offset, loop = pick_playable(list_gameplays(cfg.gameplay_dir), dur, rng)
     name = f"{idx:02d}_{media.slugify(s.title)}.mp4"
     key = render.narration_key(game, offset, loop, words, choices, dur, cfg)
     log.info("  gameplay: %s (a partir de %s)%s", game.name, review.fmt_ts(offset), " repetindo" if loop else "")
-    if not render.render_narration(game, offset, loop, track, words, choices, dur, cfg, out / name,
+    if not render.render_narration(game, offset, loop, voice_track, words, choices, dur, cfg, out / name,
                                    work / "render", key):
         log.info("  já renderizado (mesma configuração), pulando")
     return {

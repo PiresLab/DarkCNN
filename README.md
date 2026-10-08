@@ -126,6 +126,10 @@ código casa o que ele ouviu com o texto **que sabemos que foi falado**. Assim a
 **Cache:** roteiro e voz ficam em `workspace\narrate\<id>\`. Mudar o texto de um bloco re-sintetiza **só ele**.
 Rodar o mesmo comando de novo não gasta nada.
 
+**Tic-tac da contagem:** no `voce-prefere`, enquanto os números 3, 2, 1 aparecem, toca um tic-tac de relógio
+(um tic e um tac por segundo). O som é gerado pelo código, sem arquivo de áudio de terceiros. `tick_volume` no
+`config.yaml` ajusta (0 desliga).
+
 **A abertura:** o prompt manda a 1ª frase falar com o espectador e fazer uma pergunta que ele não responde de cabeça,
 segurar a resposta por pelo menos duas linhas e entregar exatamente o que prometeu (sem isca vazia). O código confere a
 abertura (saudação, "você sabia que", sem pergunta/"você", mais de ~16 palavras) e, se achar fraca, marca

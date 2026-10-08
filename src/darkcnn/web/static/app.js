@@ -798,6 +798,7 @@ const CONFIG_SECTIONS = [
     ['narrate_format', 'Formato padrão', 'text', ''],
     ['target_s', 'Duração alvo da narração (s)', 'number', ''],
     ['countdown_s', 'Contagem do "você prefere" (s)', 'number', ''],
+    ['tick_volume', 'Volume do tic-tac da contagem (0 a 1)', 'number', '0 desliga o som de relógio.'],
     ['source', 'Fonte padrão (rótulo)', 'text', ''],
     ['license', 'Licença padrão', 'text', 'Vai para o review.md de toda saída.']
   ]]
