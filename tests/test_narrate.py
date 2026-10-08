@@ -264,3 +264,18 @@ def test_render_falls_back_to_voice_only_when_the_game_audio_cannot_be_decoded(t
     assert render.render_narration(game, 0.0, False, voice, words, [], 1.5, cfg, dest, tmp_path / "w", "k")
     assert dest.exists() and probe_duration(dest) == pytest.approx(1.5, abs=0.3)
     assert len(calls) == 2 and not any("amix" in c for c in calls[1])
+
+
+@needs_ffmpeg
+def test_weak_opening_is_reported_but_the_video_is_still_made(tmp_path):
+    weak = script_of([S.Line(text="Fala galera, hoje vou falar do oceano e de coisas legais que existem nele")])
+    cfg = narrate_cfg(tmp_path, game_volume=0.0)
+    backend = ScriptBackend([weak])
+    factory = lambda: GeminiClient(backend, cfg.workspace_dir / "u.json", 40, sleep=lambda s: None)
+    review = narrate.run_narrate(cfg, client_factory=factory, backend=FakeTTS(DUR_PER_WORD),
+                                 transcriber=lambda w, c: [])
+    assert len(list(review.parent.glob("*.mp4"))) == 1
+    text = review.read_text(encoding="utf-8")
+    assert "Abertura fraca" in text and "saudação" in text
+    data = json.loads((review.parent / "scripts.json").read_text(encoding="utf-8"))[0]
+    assert data["opening_warnings"]

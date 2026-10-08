@@ -145,6 +145,8 @@ def write_narration_review(out_dir: Path, cfg: Config, videos: list[dict]) -> Pa
         for ln in v["lines"]:
             mark = f"**[{ln['option_a']} × {ln['option_b']}]** " if ln["kind"] == "escolha" else ""
             L.append(f"- `{fmt_ts(ln['start'])}` {mark}{ln['text']}")
+        for w in v.get("opening_warnings", []):
+            L += ["", f"- ⚠ Abertura fraca: {w}. Edite a 1ª linha em `scripts.json` ou gere de novo com `--force`."]
         if v.get("match", 1) < 0.5:
             L.append("")
             L.append("- ⚠ O Whisper reconheceu pouco desta narração: confira se a legenda está em sincronia.")

@@ -117,3 +117,28 @@ def estimated_duration_s(script: Script, cfg: Config) -> float:
     pauses = cfg.pause_s * max(0, len(script.lines) - 1)
     pauses += cfg.countdown_s * sum(1 for ln in script.lines if ln.kind == "escolha")
     return words / WORDS_PER_SECOND + pauses
+
+
+_SECOND_PERSON = re.compile(r"\b(você|voce|vocês|voces|seu|sua|seus|suas|te|teu|tua|cê)\b", re.IGNORECASE)
+_GREETING = re.compile(r"^\s*(fala,? galera|e a[ií],? (galera|pessoal)|oi,? (gente|pessoal)|ol[aá],? (gente|pessoal)|"
+                       r"hoje (eu )?vou|prepare-se|voc[eê] sabia que|bem[- ]vindos?)", re.IGNORECASE)
+MAX_OPENING_WORDS = 16
+
+
+def opening_check(s: Script) -> list[str]:
+    """Avisos sobre a abertura (1ª linha) do roteiro. Não bloqueia nada: o usuário decide."""
+    if not s.lines:
+        return []
+    first = s.lines[0]
+    if first.kind == "escolha":  # "você prefere": a própria pergunta é a abertura
+        return []
+    text = first.text.strip()
+    warns = []
+    if _GREETING.search(text):
+        warns.append("a abertura começa com saudação ou \"você sabia que\"")
+    if "?" not in text and not _SECOND_PERSON.search(text):
+        warns.append("a abertura não faz pergunta nem fala com o espectador (sem \"você\"/\"seu\"/\"?\")")
+    n = len(text.split())
+    if n > MAX_OPENING_WORDS:
+        warns.append(f"a abertura tem {n} palavras (o ideal é até ~12): longa demais para os 3 primeiros segundos")
+    return warns

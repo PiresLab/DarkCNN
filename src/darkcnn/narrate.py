@@ -120,6 +120,9 @@ def build_one(s: scriptlib.Script, idx: int, cfg: Config, backend: tts.Backend, 
     work = ws / f"{idx:02d}"
     work.mkdir(parents=True, exist_ok=True)
     voice = tts.pick_voice(cfg, rng)
+    opening = scriptlib.opening_check(s)
+    for w in opening:
+        log.warning("  %s", w)
     blocks = make_blocks(s)
     texts = [" ".join(s.lines[i].text for i in blk) for blk in blocks]
     log.info("roteiro %d: %s (%d linhas, %d bloco(s) de voz, voz %s)", idx, s.title, len(s.lines),
@@ -157,7 +160,7 @@ def build_one(s: scriptlib.Script, idx: int, cfg: Config, backend: tts.Backend, 
     return {
         "rank": idx, "file": name, "title": s.title, "topic": s.topic, "duration": round(dur, 2),
         "voice": voice, "format": cfg.narrate_format, "gameplay": str(game), "gameplay_start": offset,
-        "gameplay_loop": loop, "match": round(conf, 2),
+        "gameplay_loop": loop, "match": round(conf, 2), "opening_warnings": opening,
         "lines": [{"text": ln.text, "kind": ln.kind, "option_a": ln.option_a, "option_b": ln.option_b,
                    "start": round(t0, 2), "end": round(t1, 2)} for ln, (t0, t1) in zip(s.lines, times)],
     }

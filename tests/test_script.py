@@ -31,7 +31,6 @@ def test_prompt_has_format_block_target_and_no_placeholders():
     assert "3 roteiro(s)" in p and "voce-prefere" in p and "VOCÊ PREFERE" in p
     assert "50 segundos" in p and f"{int(50 * S.WORDS_PER_SECOND)} palavras" in p
     assert "escolha você mesmo um assunto" in p  # sem --topic, a IA escolhe
-    assert "{" not in p.replace("{", "", 0) or all(x not in p for x in ("{count}", "{format_block}", "{topic_block}"))
 
 
 def test_prompt_with_explicit_topic_and_free_format():
@@ -48,3 +47,34 @@ def test_estimated_duration_counts_words_and_pauses():
     ])
     # 27 palavras / 2.6 + 1 pausa + 1 contagem
     assert S.estimated_duration_s(s, cfg) == pytest.approx(27 / S.WORDS_PER_SECOND + 0.5 + 3.0)
+
+
+def _script(*lines):
+    return S.Script(title="t", topic="x", lines=[S.Line(text=t) for t in lines])
+
+
+def test_opening_check_accepts_a_question_to_the_viewer():
+    assert S.opening_check(_script("Por que o seu cérebro te engana todo dia?", "E a resposta é o oposto.")) == []
+    assert S.opening_check(_script("Tudo que te contaram sobre o sono está errado.")) == []  # 2ª pessoa, sem "?"
+    assert S.opening_check(_script("Quem inventou o zero?")) == []  # pergunta, sem "você"
+
+
+def test_opening_check_flags_weak_openings():
+    assert any("saudação" in w for w in S.opening_check(_script("Fala galera, hoje vou te contar algo.")))
+    assert any("saudação" in w for w in S.opening_check(_script("Você sabia que o polvo tem três corações?")))
+    assert any("não faz pergunta" in w for w in S.opening_check(_script("O polvo tem três corações.")))
+    longa = " ".join(["palavra"] * 20) + " você?"
+    assert any("20 palavras" in w or "21 palavras" in w for w in S.opening_check(_script(longa)))
+
+
+def test_opening_check_ignores_empty_and_choice_openers():
+    assert S.opening_check(S.Script.model_construct(title="t", topic="x", lines=[])) == []
+    q = S.Script(title="t", topic="x", lines=[S.Line(text="nunca mais dormir ou nunca mais comer", kind="escolha",
+                                                      option_a="A", option_b="B")])
+    assert S.opening_check(q) == []
+
+
+def test_prompt_asks_for_a_persuasive_opening():
+    p = S.build_prompt(Config())
+    assert "SEGURE A RESPOSTA" in p and "CUMPRA A PROMESSA" in p and "fala diretamente com quem assiste" in p
+    assert "{count}" not in p and "{target_s" not in p

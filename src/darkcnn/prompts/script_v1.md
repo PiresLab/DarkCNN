@@ -6,8 +6,15 @@ TAREFA: escreva {count} roteiro(s) no formato "{format_name}".
 
 {topic_block}
 
+ABERTURA (os 3 primeiros segundos decidem se a pessoa fica)
+- A PRIMEIRA FRASE fala diretamente com quem assiste (use "você", "seu" ou "sua") e levanta uma pergunta que a pessoa NÃO consegue responder de cabeça, ou que contraria o que ela acredita. Curta: até doze palavras. Nada de saudação, apresentação, "você sabia que", "fala galera", "hoje eu vou te contar".
+- SEGURE A RESPOSTA: a pergunta da primeira linha não pode ser respondida na primeira nem na segunda linha. A segunda linha aumenta a tensão ou estreita o mistério (por exemplo, dizendo que a explicação é o oposto do que se imagina). Só depois vem a explicação.
+- CUMPRA A PROMESSA: a resposta tem que entregar exatamente o que a abertura prometeu. Gancho que não se paga faz a pessoa sair irritada. Não exagere o que o fato realmente é.
+- Escolha UMA técnica por roteiro, sem copiar os exemplos (eles só ilustram o tipo): pergunta direta ("Por que o seu cérebro ...?"), contradição ("Tudo que te contaram sobre ... está errado"), cenário na segunda pessoa ("Imagina acordar e ..."), ou um contraste concreto que desafia a intuição.
+- Antes de responder, reescreva mentalmente a primeira linha de três jeitos e entregue o mais forte. Se a primeira linha puder ser cortada sem a pessoa perder nada, corte.
+- Feche o ciclo: o desfecho responde à pergunta da abertura, para quem ficou até o fim sentir que valeu.
+
 COMO ESCREVER PARA SER OUVIDO
-- A PRIMEIRA FRASE é tudo. Comece pelo fato mais surpreendente ou pela pergunta mais instigante, nunca por saudação, apresentação ou "você sabia que...". Nada de "fala galera", "hoje eu vou te contar", "prepare-se".
 - Abra uma curiosidade e RESOLVA antes do fim. Quem sai no meio perde a resposta.
 - Linguagem falada e simples: frases curtas, palavras do dia a dia, zero termo técnico sem explicação. É para ser escutado, não lido.
 - Cada frase precisa acrescentar algo. Sem enrolação, sem repetir a mesma ideia com outras palavras, sem "mas calma que tem mais".

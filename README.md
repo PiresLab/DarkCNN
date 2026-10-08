@@ -101,6 +101,11 @@ código casa o que ele ouviu com o texto **que sabemos que foi falado**. Assim a
 **Cache:** roteiro e voz ficam em `workspace\narrate\<id>\`. Mudar o texto de um bloco re-sintetiza **só ele**.
 Rodar o mesmo comando de novo não gasta nada.
 
+**A abertura:** o prompt manda a 1ª frase falar com o espectador e fazer uma pergunta que ele não responde de cabeça,
+segurar a resposta por pelo menos duas linhas e entregar exatamente o que prometeu (sem isca vazia). O código confere a
+abertura (saudação, "você sabia que", sem pergunta/"você", mais de ~16 palavras) e, se achar fraca, marca
+"⚠ Abertura fraca" no `review.md` sem barrar o vídeo. Para refazer só os roteiros: `--force`.
+
 ### A voz (TTS do Gemini)
 Usa a mesma `GEMINI_API_KEY` do resto. Sem instalar nada: a voz vem do próprio Gemini (vozes prontas como `Kore`,
 `Puck`, `Charon`…), em português do Brasil, com o estilo definido em `tts_style`.
