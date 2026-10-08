@@ -21,10 +21,10 @@ Style: Hook,{font},86,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,0
 Style: Context,{font},54,{white},{white},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,5,2,8,80,80,270,1
 Style: Theme,{font},46,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,2,0,1,5,2,8,70,70,225,1
 Style: Rank,{font},300,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,12,3,5,60,60,0,1
-Style: OptA,{font},62,{white},{white},&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,6,2,8,70,70,330,1
-Style: OptB,{font},62,{white},{white},&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,6,2,2,70,70,170,1
-Style: VS,{font},52,{yellow},{yellow},&H00000000,&H00000000,-1,0,0,0,100,100,4,0,1,5,2,5,60,60,0,1
-Style: Timer,{font},260,{yellow},{yellow},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,3,5,60,60,0,1
+Style: OptA,{font},70,{white},{white},&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,7,2,2,90,90,0,1
+Style: OptB,{font},70,{white},{white},&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,7,2,8,90,90,0,1
+Style: VS,{font},50,{yellow},{yellow},&H00000000,&H00000000,-1,0,0,0,100,100,4,0,1,5,2,5,60,60,0,1
+Style: Timer,{font},220,{yellow},{yellow},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,3,5,60,60,0,1
 Style: Badge,{font},84,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,7,50,50,95,1
 
 [Events]
@@ -107,21 +107,30 @@ def build_ass(clip: dict, words: list[dict], cfg: Config) -> str | None:
     )
 
 
+# O bloco das escolhas fica junto, no centro da tela: opção A termina um pouco acima do "OU" e a B começa
+# um pouco abaixo. A A cresce para cima e a B para baixo, então rótulo de duas linhas não invade o vizinho.
+CENTER_X, CENTER_Y = 540, 960
+OPT_GAP = 46  # distância do centro até a borda de cada opção
+TIMER_Y = 1330  # a contagem fica logo abaixo do bloco (não há fala durante ela, então não disputa com a legenda)
+
+
 def choice_events(choices: list[dict]) -> list[str]:
-    """Formato "você prefere": as duas opções na tela durante a pergunta e, depois, a contagem.
+    """Formato "você prefere": as duas opções juntas no centro durante a pergunta e a contagem.
     `choices`: {a, b, start, end, countdown}, com tempos na linha do tempo do vídeo."""
     out = []
     for c in choices:
         start, done = ass_time(c["start"]), ass_time(c["end"] + c["countdown"])
-        out.append(f"Dialogue: 1,{start},{done},OptA,,0,0,0,,{{\\fad(200,0)}}{esc(c['a']).upper()}\n")
-        out.append(f"Dialogue: 1,{start},{done},OptB,,0,0,0,,{{\\fad(200,0)}}{esc(c['b']).upper()}\n")
-        out.append(f"Dialogue: 1,{start},{ass_time(c['end'])},VS,,0,0,0,,OU\n")
+        out.append(f"Dialogue: 1,{start},{done},OptA,,0,0,0,,"
+                   f"{{\\an2\\pos({CENTER_X},{CENTER_Y - OPT_GAP})\\fad(200,0)}}{esc(c['a']).upper()}\n")
+        out.append(f"Dialogue: 1,{start},{done},OptB,,0,0,0,,"
+                   f"{{\\an8\\pos({CENTER_X},{CENTER_Y + OPT_GAP})\\fad(200,0)}}{esc(c['b']).upper()}\n")
+        out.append(f"Dialogue: 1,{start},{done},VS,,0,0,0,,{{\\an5\\pos({CENTER_X},{CENTER_Y})}}OU\n")
         total = int(c["countdown"])
         for k in range(total):  # 3, 2, 1 — um por segundo
             t0 = c["end"] + k
             out.append(f"Dialogue: 2,{ass_time(t0)},{ass_time(min(t0 + 1, c['end'] + c['countdown']))},"
-                       f"Timer,,0,0,0,,{{\\fad(0,250)\\fscx130\\fscy130\\t(0,250,\\fscx100\\fscy100)}}"
-                       f"{total - k}\n")
+                       f"Timer,,0,0,0,,{{\\an5\\pos({CENTER_X},{TIMER_Y})\\fad(0,250)\\fscx130\\fscy130"
+                       f"\\t(0,250,\\fscx100\\fscy100)}}{total - k}\n")
     return out
 
 

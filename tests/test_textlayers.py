@@ -79,9 +79,9 @@ def test_choice_events_show_both_options_then_the_countdown():
     styles = [l.split(",")[3] for l in ev]
     assert styles == ["OptA", "OptB", "VS", "Timer", "Timer", "Timer"]  # 3 s de contagem = 3 números
     assert "NUNCA SENTIR DOR" in ev[0] and "NUNCA SENTIR MEDO" in ev[1]
-    # as opções ficam da pergunta até o fim da contagem; o "OU" some quando a contagem começa
+    # as opções e o "OU" ficam da pergunta até o fim da contagem, juntos no centro
     assert ev[0].startswith("Dialogue: 1,0:00:02.00,0:00:09.00")
-    assert ev[2].startswith("Dialogue: 1,0:00:02.00,0:00:06.00") and ev[2].rstrip().endswith("OU")
+    assert ev[2].startswith("Dialogue: 1,0:00:02.00,0:00:09.00") and ev[2].rstrip().endswith("OU")
     assert ev[3].startswith("Dialogue: 2,0:00:06.00,0:00:07.00") and ev[3].rstrip().endswith("3")
     assert ev[5].rstrip().endswith("1") and ev[5].startswith("Dialogue: 2,0:00:08.00,0:00:09.00")
 
@@ -101,3 +101,16 @@ def test_narration_ass_has_captions_and_choices_together():
     sem = T.build_narration_ass(words, CHOICES, 10.0, Config(text_mode="none"))
     assert "Default" not in [l.split(",")[3] for l in sem.splitlines() if l.startswith("Dialogue")]
     assert "OptA" in sem
+
+
+def test_choice_block_is_compact_and_centered():
+    """A opção A termina logo acima do centro e a B começa logo abaixo; o "OU" fica no meio e a contagem embaixo."""
+    import re
+    ev = T.choice_events(CHOICES)
+    pos = [tuple(int(x) for x in re.search(r"\\pos\((\d+),(\d+)\)", l).groups()) for l in ev]
+    (ax, ay), (bx, by), (vx, vy), (tx, ty) = pos[0], pos[1], pos[2], pos[3]
+    assert ax == bx == vx == tx == 540  # tudo centralizado na horizontal
+    assert vy == 960 and ay < vy < by  # A em cima, OU no meio, B embaixo
+    assert by - ay <= 120  # juntas: antes ficavam a ~1200 px uma da outra
+    assert ty > by  # a contagem não cobre as opções
+    assert "\\an2" in ev[0] and "\\an8" in ev[1]  # A cresce para cima e B para baixo (rótulo de 2 linhas não invade)
