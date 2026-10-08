@@ -50,5 +50,6 @@ watermark:
 #   gumball:
 #     ref_audio: C:/vozes/gumball.wav # 3-10 s; caminho lido pelo SERVIDOR do GPT-SoVITS
 #     prompt_text: "exatamente o que é falado nesse áudio"
-#     lang: pt
+#     lang: auto                      # idioma do texto; o GPT-SoVITS v2 NÃO aceita "pt" (veja README)
+#     prompt_lang: en                 # idioma do áudio de referência (vazio = igual a lang)
 #     speed: 1.0

@@ -1,0 +1,2 @@
+[console_scripts]
+darkcnn = darkcnn.cli:main

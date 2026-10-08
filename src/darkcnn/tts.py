@@ -84,7 +84,7 @@ class GPTSoVITSBackend:
         payload = {
             "text": text, "text_lang": voice.lang,
             "ref_audio_path": str(voice.ref_audio), "prompt_text": voice.prompt_text,
-            "prompt_lang": voice.lang, "text_split_method": self.split_method,
+            "prompt_lang": voice.prompt_lang or voice.lang, "text_split_method": self.split_method,
             "media_type": "wav", "streaming_mode": False, "speed_factor": voice.speed,
         }
         r = self._post("/tts", json=payload)

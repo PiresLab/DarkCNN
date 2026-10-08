@@ -25,7 +25,8 @@ class VoiceCfg(BaseModel):
 
     ref_audio: Path  # WAV de referência; o caminho é lido pelo SERVIDOR do GPT-SoVITS
     prompt_text: str = ""  # o que é falado no áudio de referência (melhora muito a imitação)
-    lang: str = "pt"  # idioma do texto e do áudio de referência
+    lang: str = "pt"  # idioma do texto a falar (o que o servidor aceita depende da versão do GPT-SoVITS)
+    prompt_lang: str = ""  # idioma do áudio de referência; vazio = o mesmo de `lang`
     speed: float = Field(1.0, gt=0.1, le=3.0)
     gpt_weights: Path | None = None  # modelos próprios dessa voz (opcional)
     sovits_weights: Path | None = None
