@@ -18,7 +18,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "fastapi", "uvicorn", "httpx"]
+web = ["fastapi>=0.115", "uvicorn>=0.30"]
 
 [project.scripts]
 darkcnn = "darkcnn.cli:main"
@@ -27,7 +28,7 @@ darkcnn = "darkcnn.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-darkcnn = ["prompts/*.md"]
+darkcnn = ["prompts/*.md", "web/static/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

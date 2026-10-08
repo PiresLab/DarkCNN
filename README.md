@@ -73,6 +73,31 @@ da fonte, que vale para todos os trechos. Passa de 3 min? Ele avisa (limite do Y
 **Mudar a ordem ou os limites:** edite `rank`, `start`, `end` ou `title` no `selection.json` (o `rank` define a posição) e rode
 `python -m darkcnn render "<link>" --theme "top 5 finalizações"`: só os trechos alterados são renderizados de novo.
 
+## Painel (`web`)
+
+Tela local para configurar, gerar e revisar sem decorar flags. Ela não reimplementa nada: chama o mesmo
+pipeline do terminal e mostra o log ao vivo.
+
+```powershell
+pip install -e ".[web]"
+python -m darkcnn web                 # abre http://127.0.0.1:8765 no navegador
+python -m darkcnn web --port 9000 --no-browser
+```
+
+- **Visão geral:** requisições e tokens do dia, execuções recentes, saídas e os avisos de antes de postar.
+- **Nova geração:** os três modos (cortes, compilado, narração) em formulário, com custo estimado e o
+  **comando equivalente** do terminal ao lado, para você conferir o que vai rodar.
+- **Execuções:** etapas, log ao vivo (SSE) e **Interromper**, que mata o FFmpeg daquela execução sem afetar as outras.
+- **Revisão:** prévia do vídeo, notas da 1ª passada e do juiz, aprovar/descartar e ajustar início, fim e título
+  (grava no `selection.json`; depois "Re-renderizar" refaz só o que mudou, sem Gemini).
+- **Configurações:** grava o `config.yaml`, com o arquivo mostrado ao vivo; chave desconhecida é recusada com o
+  nome do campo. Também lista os modelos de voz e gera uma amostra.
+
+A barra lateral retrai no botão ao lado do logo (ou `Ctrl+B`) e a escolha fica salva no navegador.
+
+> Serve em `127.0.0.1` e **não tem senha**: é ferramenta local. Não exponha a porta na internet nem rode com
+> `--host 0.0.0.0` numa rede que você não controla.
+
 ## Vídeos narrados sobre gameplay (`narrate`)
 Sem vídeo-fonte: a IA escreve o roteiro, uma voz narra e o texto aparece como legenda sobre uma gameplay
 aleatória da sua pasta.

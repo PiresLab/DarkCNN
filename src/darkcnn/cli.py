@@ -86,6 +86,15 @@ def build_parser() -> argparse.ArgumentParser:
     vc.add_argument("--output", dest="output_dir", type=Path)
     vc.add_argument("--workspace", dest="workspace_dir", type=Path)
 
+    wb = sub.add_parser("web", help="abre o painel no navegador (configura e gera pela tela)")
+    wb.add_argument("--config", type=Path)
+    wb.add_argument("--host", default="127.0.0.1", help="padrão 127.0.0.1 (só esta máquina)")
+    wb.add_argument("--port", type=int, default=8765)
+    wb.add_argument("--no-browser", dest="open_browser", action="store_false",
+                    help="não abre o navegador sozinho")
+    wb.add_argument("--workspace", dest="workspace_dir", type=Path)
+    wb.add_argument("--output", dest="output_dir", type=Path)
+
     sh = sub.add_parser("shots", help="diagnóstico do perfil visual: planos e volume (não usa o Gemini)")
     common(sh)
 
@@ -99,7 +108,17 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_dotenv()
     overrides = {k: v for k, v in vars(args).items()
-                 if k not in ("cmd", "input", "config", "force", "say", "all", "models")}
+                 if k not in ("cmd", "input", "config", "force", "say", "all", "models",
+                               "host", "port", "open_browser")}
+    if args.cmd == "web":  # o painel lê o config.yaml a cada pedido; aqui só validamos as flags
+        from .web.api import serve
+        try:
+            serve(args.config, args.host, args.port, overrides, args.open_browser)
+        except ImportError as e:
+            print(f"\nERRO: o painel precisa das dependências web: pip install -e \".[web]\" ({e})",
+                  file=sys.stderr)
+            return 1
+        return 0
     cfg = load_config(args.config, overrides)
     if getattr(args, "input", None) and not is_url(args.input) and getattr(args, "source", None) \
             and is_url(args.source):

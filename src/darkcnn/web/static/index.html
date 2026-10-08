@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DarkCNN Studio</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Crect width='30' height='30' rx='9' fill='%23F5A524'/%3E%3Cpath d='M11 8.5 L20 15 L11 21.5 Z' fill='%2317120A'/%3E%3C/svg%3E">
+</head>
+<body>
+<div class="shell">
+  <aside class="rail">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><rect x=".5" y=".5" width="29" height="29" rx="9" fill="#F5A524"></rect><path d="M11 8.5 L20 15 L11 21.5 Z" fill="#17120A"></path><path d="M8.5 8.5 L8.5 21.5" stroke="#17120A" stroke-width="2.4" stroke-linecap="round"></path></svg>
+      <div class="brand-text">
+        <div class="brand-name">DarkCNN</div>
+        <div class="brand-sub">Studio</div>
+      </div>
+      <button type="button" class="rail-toggle" id="rail-toggle" aria-expanded="true" aria-controls="nav" title="Retrair a barra lateral">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M14 7l-5 5 5 5"></path><path d="M19 4v16"></path></svg>
+        <span class="sr-only" hidden>Retrair a barra lateral</span>
+      </button>
+    </div>
+
+    <nav class="nav" id="nav" aria-label="Seções">
+      <a href="#/" data-route="/"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="7" height="8" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="3" y="15" width="7" height="6" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect></svg><span>Visão geral</span></a>
+      <a href="#/gerar" data-route="/gerar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg><span>Nova geração</span></a>
+      <a href="#/execucoes" data-route="/execucoes"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg><span>Execuções</span><span class="pill hot" id="pill-jobs" hidden>0</span></a>
+      <a href="#/revisao" data-route="/revisao"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg><span>Revisão</span><span class="pill" id="pill-review" hidden>0</span></a>
+      <a href="#/config" data-route="/config"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"></path><circle cx="16" cy="7" r="2.2"></circle><circle cx="8" cy="17" r="2.2"></circle></svg><span>Configurações</span></a>
+    </nav>
+
+    <div class="rail-foot" id="env">
+      <div class="k">Ambiente local</div>
+      <div class="row"><span class="dot wait"></span><span>verificando…</span></div>
+    </div>
+  </aside>
+
+  <main class="main" id="view" role="main">
+    <p class="empty">Carregando…</p>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

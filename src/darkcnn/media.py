@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import subprocess
+import threading
 import unicodedata
 from pathlib import Path
 
@@ -13,17 +14,39 @@ class MediaError(RuntimeError):
     pass
 
 
+# Processos em andamento por thread: deixa o painel web interromper o FFmpeg de um job sem tocar nos outros.
+_running: dict[int, subprocess.Popen] = {}
+_running_lock = threading.Lock()
+
+
+def kill_thread_process(ident: int) -> bool:
+    """Mata o processo que a thread `ident` está esperando. Devolve False se não havia nenhum."""
+    with _running_lock:
+        p = _running.get(ident)
+    if p is None:
+        return False
+    p.kill()
+    return True
+
+
 def run(cmd: list, cwd: Path | None = None) -> subprocess.CompletedProcess:
     cmd = [str(c) for c in cmd]
+    ident = threading.get_ident()
     try:
-        p = subprocess.run(
-            cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-        )
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, encoding="utf-8", errors="replace")
     except FileNotFoundError as e:
         raise MediaError(f"programa não encontrado: {cmd[0]} (instale o FFmpeg e ponha no PATH)") from e
+    with _running_lock:
+        _running[ident] = p
+    try:
+        out, err = p.communicate()
+    finally:
+        with _running_lock:
+            _running.pop(ident, None)
     if p.returncode != 0:
-        raise MediaError(f"falhou ({p.returncode}): {' '.join(cmd)}\n{p.stderr[-1500:]}")
-    return p
+        raise MediaError(f"falhou ({p.returncode}): {' '.join(cmd)}\n{(err or '')[-1500:]}")
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
 
 
 def probe_duration(path: Path) -> float:
