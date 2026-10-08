@@ -30,6 +30,8 @@ class VoiceCfg(BaseModel):
     speed: float = Field(1.0, gt=0.1, le=3.0)
     gpt_weights: Path | None = None  # modelos próprios dessa voz (opcional)
     sovits_weights: Path | None = None
+    exaggeration: float = Field(0.5, ge=0.0, le=2.0)  # só Chatterbox: expressividade
+    cfg_weight: float = Field(0.5, ge=0.0, le=1.0)  # só Chatterbox: 0 reduz o sotaque da referência
 
 
 class Config(BaseModel):
@@ -62,7 +64,7 @@ class Config(BaseModel):
     target_s: float = Field(45.0, gt=5)  # duração alvo da narração
     voice: str = "default"  # nome de uma voz em `voices`
     voices: dict[str, VoiceCfg] = {}
-    tts_backend: Literal["gptsovits"] = "gptsovits"
+    tts_backend: Literal["gptsovits", "chatterbox"] = "gptsovits"
     tts_url: str = "http://127.0.0.1:9880"
     tts_timeout_s: float = 600.0  # síntese em CPU é lenta
     tts_split_method: str = "cut5"  # como o GPT-SoVITS quebra o texto (ver text_segmentation_method.py)

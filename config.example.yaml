@@ -45,11 +45,13 @@ watermark:
 # target_s: 45                        # duração alvo da narração
 # countdown_s: 3                      # tempo de decisão no formato "você prefere"
 # pause_s: 0.35                       # silêncio entre as linhas do roteiro
-# tts_url: http://127.0.0.1:9880      # servidor do GPT-SoVITS
+# tts_backend: chatterbox             # gptsovits (padrão) | chatterbox (aceita português)
+# tts_url: http://127.0.0.1:9881      # chatterbox: 9881 (tools/chatterbox_server.py); gptsovits: 9880
 # voices:
 #   gumball:
 #     ref_audio: C:/vozes/gumball.wav # 3-10 s; caminho lido pelo SERVIDOR do GPT-SoVITS
 #     prompt_text: "exatamente o que é falado nesse áudio"
 #     lang: auto                      # idioma do texto; o GPT-SoVITS v2 NÃO aceita "pt" (veja README)
 #     prompt_lang: en                 # idioma do áudio de referência (vazio = igual a lang)
-#     speed: 1.0
+#     speed: 1.0                      # (só GPT-SoVITS)
+#     # chatterbox: lang: pt, exaggeration: 0.5, cfg_weight: 0.5 (0 reduz o sotaque da referência)

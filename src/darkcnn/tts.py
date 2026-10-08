@@ -98,7 +98,36 @@ class GPTSoVITSBackend:
         dest.write_bytes(data)
 
 
+# ---------------------------------------------------------------- Chatterbox
+class ChatterboxBackend:
+    """Fala com `tools/chatterbox_server.py` (roda no ambiente do Chatterbox, Python 3.11)."""
+
+    def __init__(self, url: str, timeout_s: float = 600.0):
+        self.url = url.rstrip("/")
+        self.timeout_s = timeout_s
+
+    def say(self, text: str, voice: VoiceCfg, dest: Path) -> None:
+        import requests
+
+        payload = {"text": text, "language_id": voice.lang, "audio_prompt_path": str(voice.ref_audio),
+                   "exaggeration": voice.exaggeration, "cfg_weight": voice.cfg_weight}
+        try:
+            r = requests.post(f"{self.url}/tts", json=payload, timeout=self.timeout_s)
+        except Exception as e:
+            raise TTSError(
+                f"não consegui falar com o servidor do Chatterbox em {self.url} ({type(e).__name__}). "
+                "Ele está rodando? Inicie com: python tools/chatterbox_server.py --port 9881") from e
+        if r.status_code != 200:
+            raise TTSError(f"o Chatterbox recusou a síntese ({r.status_code}): {r.text[:400]}")
+        if r.content[:4] != b"RIFF":
+            raise TTSError(f"o servidor do Chatterbox não mandou um WAV (começo: {r.content[:40]!r})")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(r.content)
+
+
 def make_backend(cfg: Config) -> Backend:
+    if cfg.tts_backend == "chatterbox":
+        return ChatterboxBackend(cfg.tts_url, cfg.tts_timeout_s)
     return GPTSoVITSBackend(cfg.tts_url, cfg.tts_timeout_s, cfg.tts_split_method)
 
 

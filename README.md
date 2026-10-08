@@ -187,3 +187,17 @@ pip install -e ".[dev]"
 pytest                                        # usa FFmpeg real em vídeo sintético; Whisper e Gemini são falsos
 ```
 `spikes/` guarda os testes de validação da Fase 0 (medem Whisper, tokens e timestamps do Gemini no seu PC).
+
+## Voz em português com o Chatterbox (alternativa ao GPT-SoVITS)
+
+O GPT-SoVITS v2 não aceita português. O [Chatterbox Multilingual](https://github.com/resemble-ai/chatterbox) lista `pt` entre os idiomas e clona voz a partir de um clipe de referência (licença MIT, segundo o README).
+Ele roda num ambiente separado (o projeto recomenda Python 3.11) e o DarkCNN fala com ele por HTTP:
+
+```
+conda create -yn chatterbox python=3.11 && conda activate chatterbox
+pip install chatterbox-tts
+python tools/chatterbox_server.py --port 9881 --device cpu
+```
+
+No `config.yaml`: `tts_backend: chatterbox`, `tts_url: http://127.0.0.1:9881` e, na voz, `lang: pt` + `ref_audio` (o `prompt_text` não é usado).
+Teste com `python -m darkcnn voices --say "testando a voz"`. A 1ª execução baixa vários GB. A velocidade em CPU não foi medida.

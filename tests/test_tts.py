@@ -175,3 +175,39 @@ def test_backend_errors_are_readable(tmp_path, monkeypatch):
     # servidor fora do ar: a mensagem ensina como subir
     with pytest.raises(tts.TTSError, match="Ele está rodando.*api_v2.py"):
         tts.GPTSoVITSBackend("http://127.0.0.1:1", 2).say("oi", voice, tmp_path / "x.wav")
+
+
+def test_chatterbox_backend_sends_json_and_saves_wav(tmp_path):
+    seen = {}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen.update(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            body = b"RIFF" + b"\0" * 40
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        backend = tts.ChatterboxBackend(f"http://127.0.0.1:{srv.server_port}")
+        voice = VoiceCfg(ref_audio=tmp_path / "r.wav", lang="pt", exaggeration=0.7)
+        dest = tmp_path / "o.wav"
+        backend.say("olá", voice, dest)
+    finally:
+        srv.shutdown()
+    assert seen["language_id"] == "pt" and seen["exaggeration"] == 0.7 and seen["text"] == "olá"
+    assert dest.read_bytes()[:4] == b"RIFF"
+
+
+def test_chatterbox_backend_selected_and_server_down_is_readable(tmp_path):
+    cfg = Config(tts_backend="chatterbox", tts_url="http://127.0.0.1:1")
+    b = tts.make_backend(cfg)
+    assert isinstance(b, tts.ChatterboxBackend)
+    with pytest.raises(tts.TTSError, match="chatterbox_server"):
+        b.say("x", VoiceCfg(ref_audio=tmp_path / "r.wav"), tmp_path / "o.wav")
