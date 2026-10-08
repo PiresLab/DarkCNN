@@ -156,7 +156,8 @@ def list_tts_models() -> list[str]:
         raise TTSError("GEMINI_API_KEY não definida (crie o .env a partir do .env.example)")
     from google import genai
 
-    names = [(m.name or "").removeprefix("models/") for m in genai.Client(api_key=key).models.list()]
+    client = genai.Client(api_key=key)  # precisa continuar referenciado: a lista é paginada e carrega aos poucos
+    names = [(m.name or "").removeprefix("models/") for m in client.models.list()]
     return sorted(n for n in names if "tts" in n.lower())
 
 
