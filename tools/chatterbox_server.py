@@ -1,7 +1,7 @@
 """Servidor local do Chatterbox Multilingual (roda no ambiente do Chatterbox, NÃO no do DarkCNN).
 
     pip install chatterbox-tts          # Python 3.11 recomendado pelo projeto
-    python tools/chatterbox_server.py --port 9881 [--device cpu] [--t3-model v3]
+    python tools/chatterbox_server.py --port 9881 [--device cpu] 
 
 POST /tts  {"text", "language_id", "audio_prompt_path", "exaggeration", "cfg_weight"}  ->  WAV
 """
@@ -18,14 +18,15 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=9881)
     ap.add_argument("--device", default="cpu", help="cpu | cuda | mps")
-    ap.add_argument("--t3-model", default="v3", help="v3 (atual) ou v2")
+    ap.add_argument("--t3-model", default="", help="só para versões novas do chatterbox-tts: v3 ou v2 (vazio = padrão da versão instalada)")
     args = ap.parse_args()
 
     import torchaudio as ta
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
     print(f"carregando o modelo ({args.device})… a 1ª vez baixa vários GB", flush=True)
-    model = ChatterboxMultilingualTTS.from_pretrained(device=args.device, t3_model=args.t3_model)
+    extra = {"t3_model": args.t3_model} if args.t3_model else {}
+    model = ChatterboxMultilingualTTS.from_pretrained(device=args.device, **extra)
     print(f"pronto em http://{args.host}:{args.port}", flush=True)
 
     class H(BaseHTTPRequestHandler):
