@@ -67,13 +67,11 @@ class GeminiTTSBackend:
     """`client.models.generate_content` com `response_modalities=["AUDIO"]` e uma voz prebuilt."""
 
     def __init__(self, api_key: str | None, model: str, style: str = "", speed: float = 1.0,
-                 min_interval_s: float = 7.0, retries: int = 3, backoff_s: float = 10.0,
-                 client: Any = None, sleep: Callable[[float], None] = time.sleep,
-                 clock: Callable[[], float] = time.monotonic):
+                 retries: int = 3, backoff_s: float = 10.0, client: Any = None,
+                 sleep: Callable[[float], None] = time.sleep):
         self.api_key, self.model, self.style, self.speed = api_key, model, style.strip(), speed
-        self.min_interval_s, self.retries, self.backoff_s = min_interval_s, retries, backoff_s
-        self._client, self._sleep, self._clock = client, sleep, clock
-        self._last: float | None = None
+        self.retries, self.backoff_s = retries, backoff_s
+        self._client, self._sleep = client, sleep
 
     def _get_client(self):
         if self._client is None:
@@ -83,13 +81,6 @@ class GeminiTTSBackend:
 
             self._client = genai.Client(api_key=self.api_key)
         return self._client
-
-    def _pace(self) -> None:
-        if self._last is not None:
-            wait = self.min_interval_s - (self._clock() - self._last)
-            if wait > 0:
-                self._sleep(wait)
-        self._last = self._clock()
 
     def _request(self, text: str, voice: str) -> tuple[bytes, int]:
         from google.genai import types
@@ -114,7 +105,6 @@ class GeminiTTSBackend:
         last: Exception | None = None
         pcm, rate = b"", PCM_SR
         for attempt in range(self.retries + 1):
-            self._pace()
             try:
                 pcm, rate = self._request(text, voice)
                 break
@@ -146,7 +136,7 @@ class _NoAudio(Exception):
 
 def make_backend(cfg: Config) -> Backend:
     return GeminiTTSBackend(os.environ.get("GEMINI_API_KEY"), cfg.tts_model, cfg.tts_style, cfg.tts_speed,
-                            cfg.tts_min_interval_s, cfg.tts_retries)
+                            cfg.tts_retries)
 
 
 def list_tts_models() -> list[str]:

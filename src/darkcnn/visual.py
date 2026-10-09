@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -154,7 +153,7 @@ def reconcile(c: dict[str, Any], shots: list[Shot], window_start: float,
 # ---------------------------------------------------------------- seleção por janela
 def select_visual(video: Path, vid: str, ws: Path, shots: list[Shot], cfg: Config,
                   client_factory: Callable[[], GeminiClient], force: bool = False,
-                  sleep: Callable[[float], None] = time.sleep, *, theme: str | None = None) -> tuple[list[dict], dict]:
+                  *, theme: str | None = None) -> tuple[list[dict], dict]:
     """Uma chamada ao Gemini por janela (com cache por janela: falha na janela 3 não refaz a 1 e a 2).
     Devolve (candidatos com IDs reconciliados, estatísticas)."""
     # com tema: prompt, schema e cache próprios (o mesmo vídeo pode gerar vários compilados com temas diferentes)
@@ -177,9 +176,6 @@ def select_visual(video: Path, vid: str, ws: Path, shots: list[Shot], cfg: Confi
                            max=cfg.max_clip_s, fps=cfg.visual_fps, h=cfg.proxy_height, thinking=cfg.thinking_level)
         cands = None if force else cache.load(path, key)
         if cands is None:
-            if stats["api_calls"]:
-                log.info("aguardando %.0fs (limite de tokens por minuto)…", cfg.visual_pause_s)
-                sleep(cfg.visual_pause_s)
             log.info("janela %d/%d: %s–%s, preparando vídeo reduzido…", i + 1, len(windows),
                      fmt_ts(win[0]["start"]), fmt_ts(win[-1]["end"]))
             proxy = make_proxy(video, win, ws / "proxy" / f"win_{i:02d}.mp4", cfg, ws / "proxy" / f"tmp_{i:02d}")

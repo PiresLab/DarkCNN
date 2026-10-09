@@ -10,6 +10,6 @@ Título: {title}
 {niche_block}
 
 REGRAS
-- `caption`: uma legenda curta (até 110 caracteres) que gera curiosidade e convida a assistir até o fim. Sem spoiler da resposta, sem emoji em excesso (no máximo 1), sem aspas, sem hashtags dentro dela.
-- `hashtags`: de 3 a 5 hashtags relevantes, sem o `#`, sem espaços e sem acentos nem pontuação. Misture 1 ou 2 amplas (ex.: curiosidades) e as demais específicas do assunto. Não use #fyp nem #foryou.
+- `caption`: uma legenda curta (até 110 caracteres) que gera curiosidade e convida a assistir até o fim. Sem spoiler da resposta, no máximo 1 emoji, sem aspas, sem hashtags dentro dela.
+- `hashtags`: exatamente 3 hashtags específicas do assunto do vídeo, sem o `#`, sem espaços, sem acentos nem pontuação. Pense no que as pessoas de fato pesquisam sobre esse assunto (ex.: o tema, a área e um termo mais amplo). NÃO inclua hashtags de alcance como fy, fyp, foryou, parati ou viral: elas são adicionadas depois pelo sistema.
 - Não cite nomes de pessoas ou marcas que não apareçam nos dados.

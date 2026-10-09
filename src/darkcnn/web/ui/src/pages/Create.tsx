@@ -16,7 +16,7 @@ export function summarize(spec: PresetSpec): [string, string][] {
   if (spec.mode === "narrate") rows.push(["Formato", spec.narrate_format]);
   rows.push(["Tema", spec.auto_topic ? `A IA escolhe${spec.niche ? ` (${spec.niche})` : ""}` : ((spec.mode === "compile" ? spec.theme : spec.topic) ?? "—")]);
   if (spec.mode !== "narrate") rows.push(["Vídeo-fonte", spec.auto_source ? "A IA procura no YouTube" : (spec.source ?? "—")]);
-  rows.push([spec.mode === "narrate" ? "Vídeos" : "Cortes", String(spec.count)]);
+  rows.push([spec.mode === "narrate" ? "Vídeos" : spec.mode === "compile" ? "Momentos no top" : "Cortes", spec.mode === "narrate" ? String(spec.count) : spec.clips ? String(spec.clips) : "padrão das Configurações"]);
   if (spec.mode === "narrate") {
     rows.push(["Voz", spec.tts_voice ?? "Padrão"]);
     rows.push(["Gameplay", spec.gameplay_ids.length ? `${spec.gameplay_ids.length} selecionada(s)` : "Qualquer uma"]);
@@ -45,7 +45,7 @@ export default function Create() {
     onError: (e: Error) => toast(e.message, "bad"),
   });
 
-  const aiCalls = spec.mode === "narrate" ? 1 + (spec.auto_topic ? 1 : 0) : 2 + spec.count;
+  const aiCalls = spec.mode === "narrate" ? 1 + (spec.auto_topic ? 1 : 0) : 2 + (spec.clips ?? 5);
   const last = step === STEPS.length - 1;
   const lookSkipped = spec.mode !== "narrate";
 

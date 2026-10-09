@@ -45,5 +45,4 @@ watermark:
 # tts_voice: Kore                     # voz do Gemini (ouça com `darkcnn voices --say "oi" --all`)
 # tts_voices_pool: [Kore, Puck]       # opcional: sorteia uma voz por vídeo
 # tts_speed: 1.0                      # 1.1-1.2 deixa o ritmo mais de short (não muda o tom)
-# tts_min_interval_s: 7               # espaço entre chamadas de voz (limite por minuto do TTS)
 # tts_style: "Narre em português do Brasil, ..."   # tom e ritmo da narração (vem pronto)

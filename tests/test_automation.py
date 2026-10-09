@@ -255,3 +255,16 @@ def test_adhoc_run_carries_its_spec_in_the_job(tmp_path):
     assert job["preset_id"] is None and job["params"]["spec"]["narrate_format"] == "e-se"
     assert wait_for(lambda: st.jobs.get(job["id"])["status"] == "done")
     assert seen == {"source": "adhoc", "fmt": "e-se"}
+
+
+def test_clips_field_sets_clips_per_video_for_cuts_and_compile_only():
+    base = {"clips_per_video": 7}
+    run = presets.build_config(base, presets.PresetSpec(mode="run", clips=3), None, None)
+    top = presets.build_config(base, presets.PresetSpec(mode="compile", clips=4), None, None)
+    assert run.clips_per_video == 3 and top.clips_per_video == 4
+    # sem valor no preset vale o de Configurações; narração nunca mexe nos cortes
+    assert presets.build_config(base, presets.PresetSpec(mode="run"), None, None).clips_per_video == 7
+    nar = presets.build_config(base, presets.PresetSpec(mode="narrate", count=2, clips=9), None, None)
+    assert nar.clips_per_video == 7 and nar.count == 2
+    # `count` (vídeos narrados) deixou de ser usado como "quantos cortes"
+    assert presets.build_config(base, presets.PresetSpec(mode="run", count=9), None, None).clips_per_video == 7

@@ -49,6 +49,10 @@ class PlaywrightDriver:
         self.ctx: Any = None
 
     def open(self, proxy: str | None) -> None:
+        self.launch(proxy)
+        self.page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
+
+    def launch(self, proxy: str | None) -> None:
         require()
         from autotok import settings
         from autotok.browsers import open_browser, sync_playwright
@@ -61,18 +65,60 @@ class PlaywrightDriver:
             self.ctx = self._handle.context()
             self.page = self._handle.page(self.ctx)
         else:
-            self.ctx = self._handle.context(viewport=VIEWPORT, user_agent=settings.DEFAULT_USER_AGENT,
-                                            locale="pt-BR")
+            self.ctx = self._handle.context(viewport=VIEWPORT, user_agent=settings.DEFAULT_USER_AGENT, locale="pt-BR")
             self.page = self.ctx.new_page()
-        self.page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
+        self.ctx.on("page", self._follow)  # o TikTok abre a verificação de identidade em outra aba/janela
+
+    def _follow(self, page: Any) -> None:
+        """Passa a mostrar a página nova e, se ela fechar, volta para a anterior."""
+        prev = self.page
+        self.page = page
+        try:
+            page.bring_to_front()
+        except Exception:  # noqa: BLE001
+            pass
+
+        def back(_: Any = None) -> None:
+            if self.page is page:
+                alive = [p for p in self.ctx.pages if not p.is_closed()]
+                self.page = alive[-1] if alive else prev
+
+        page.on("close", back)
 
     def screenshot(self) -> bytes:
         return self.page.screenshot(type="jpeg", quality=70)
 
     def click(self, x: float, y: float) -> None:
-        self.page.mouse.click(x, y)
+        # mover antes de clicar e segurar um instante: alguns widgets do TikTok ignoram clique "seco"
+        self.page.mouse.move(x, y, steps=4)
+        self.page.mouse.down()
+        self.page.wait_for_timeout(60)
+        self.page.mouse.up()
+
+    FOCUSED = ("() => { const a = document.activeElement; return !!a && (a.tagName === 'INPUT' || "
+               "a.tagName === 'TEXTAREA' || a.isContentEditable); }")
+    FIRST_INPUT = "input:not([type=hidden]):not([type=checkbox]):not([type=radio]):visible, textarea:visible"
+
+    def _field_focused(self) -> bool:
+        for fr in self.page.frames:
+            try:
+                if fr.evaluate(self.FOCUSED):
+                    return True
+            except Exception:  # noqa: BLE001 - frame navegando
+                continue
+        return False
 
     def type(self, text: str) -> None:
+        """Digita no campo em foco; se nenhum estiver, foca o 1º campo visível (inclusive dentro de iframes)."""
+        if not self._field_focused():
+            for fr in self.page.frames:
+                try:
+                    field = fr.locator(self.FIRST_INPUT).first
+                    if field.count():
+                        field.click(timeout=2000)
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
         self.page.keyboard.type(text, delay=20)
 
     def press(self, key: str) -> None:
@@ -128,12 +174,14 @@ class LoginSession:
     def active(self) -> bool:
         return self.status in ("starting", "waiting")
 
-    def _apply(self, drv: Driver) -> None:
+    def _apply(self, drv: Driver) -> bool:
+        did = False
         while True:
             try:
                 kind, arg = self._cmds.get_nowait()
             except queue.Empty:
-                return
+                return did
+            did = True
             try:
                 if kind == "click":
                     drv.click(arg[0], arg[1])
@@ -151,7 +199,8 @@ class LoginSession:
             self.status = "waiting"
             t0 = time.monotonic()
             while not self._stop.is_set():
-                self._apply(drv)
+                if self._apply(drv):
+                    drv.wait(350)  # deixa a página reagir antes do quadro: o usuário vê o efeito do clique/tecla
                 self.frame = drv.screenshot()
                 cookies = drv.cookies()
                 names = {c.get("name") for c in cookies if c.get("value")}
@@ -161,7 +210,7 @@ class LoginSession:
                     return
                 if time.monotonic() - t0 > TIMEOUT_S:
                     raise TimeoutError("tempo esgotado: o login não foi concluído em 10 minutos")
-                drv.wait(700)
+                drv.wait(450)
             self.status = "cancelled"
         except Exception as e:  # noqa: BLE001
             self.status, self.error = "error", self._friendly(e)

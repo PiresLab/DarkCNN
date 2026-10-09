@@ -1,7 +1,9 @@
 """Publicar um vídeo no TikTok (usado pelo botão "Postar" e pelas automações)."""
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +40,8 @@ class PostOptions(BaseModel):
     allow_comment: bool = True
     allow_duet: bool = False
     allow_stitch: bool = False
+    allow_content_reuse: bool = True  # "permitir reutilização do conteúdo" (padrão do TikTok Studio)
+    allow_ai_remix: bool = True  # "permitir remix com IA" (padrão do TikTok Studio)
 
 
 @dataclass
@@ -46,11 +50,31 @@ class PostResult:
     scheduled_for: float | None
 
 
+def describe(video: Path, opts: "PostOptions") -> str:
+    """Resumo do que está sendo enviado: vai para o log, para diagnosticar recusas do TikTok."""
+    bits = [f"{video.stat().st_size / 1e6:.1f} MB"]
+    try:
+        from .. import media
+        info = media.video_info(video)
+        bits.append(f"{info['width']}x{info['height']} {info['duration']:.0f}s")
+    except Exception:  # noqa: BLE001 - sem ffprobe o resumo fica mais curto
+        pass
+    tags = len(re.findall(r"#\w+", opts.caption))
+    return (f"enviando {video.name} ({', '.join(bits)}) conta={opts.account} {opts.visibility} "
+            f"agendado={'sim' if opts.schedule_s else 'não'} rótulo_IA={opts.ai_label} "
+            f"legenda={len(opts.caption)} caracteres, {tags} hashtags")
+
+
 def normalize_schedule(schedule_s: int | None) -> int | None:
     """O TikTok só agenda entre 15 min e 10 dias: um atraso menor que 15 min vira 15 min."""
     if not schedule_s:
         return None
     return max(MIN_SCHEDULE_S, int(schedule_s))
+
+
+def _default_client(root: Path):
+    from .client import StudioClient
+    return lambda name: StudioClient.from_account(name, store=accounts.store(root))
 
 
 def post_video(root: Path, video: Path, opts: PostOptions, *, client_factory: Callable[[str], Any] | None = None,
@@ -64,10 +88,15 @@ def post_video(root: Path, video: Path, opts: PostOptions, *, client_factory: Ca
     video = Path(video)
     if not video.is_file():
         raise PostError(f"vídeo não encontrado: {video.name}")
-    factory = client_factory or (lambda name: __import__("autotok").Client.from_account(name, store=accounts.store(root)))
+    factory = client_factory or _default_client(root)
+    log.info(describe(video, opts))
     for attempt in range(RETRIES + 1):
         try:
-            res = factory(opts.account).upload(
+            client = factory(opts.account)
+            if hasattr(client, "configure"):
+                client.configure(allow_content_reuse=opts.allow_content_reuse, allow_ai_remix=opts.allow_ai_remix,
+                                 video=video)
+            res = client.upload(
                 video, opts.caption, schedule=normalize_schedule(opts.schedule_s), visibility=opts.visibility,
                 allow_comment=opts.allow_comment, allow_duet=opts.allow_duet, allow_stitch=opts.allow_stitch,
                 ai_label=opts.ai_label)
@@ -79,7 +108,11 @@ def post_video(root: Path, video: Path, opts: PostOptions, *, client_factory: Ca
         except (NotLoggedInError, AccountNotFoundError) as e:
             raise PostError("a sessão do TikTok expirou ou a conta não está conectada: reconecte em Configurações") from e
         except PublishError as e:
-            raise PostError(f"o TikTok recusou o vídeo: {e.status_msg or e}") from e
+            # o TikTok respondeu e recusou: nada foi publicado. A resposta completa vai para o log da execução.
+            detail = json.dumps(getattr(e, "response", None) or {}, ensure_ascii=False)[:400]
+            log.warning("TikTok recusou a publicação: status_code=%s status_msg=%r resposta=%s", e.status_code,
+                        e.status_msg, detail)
+            raise PostError(f"o TikTok recusou o vídeo: {e.status_msg or e} (código {e.status_code})") from e
         except ValidationError as e:
             raise PostError(str(e)) from e
         except AutotokError as e:

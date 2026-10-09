@@ -178,8 +178,8 @@ def register(app: Any, st: Any, login_manager: LoginManager | None = None) -> No
             from .. import pipeline
             client = factory() if factory else pipeline.make_client(st.cfg())
         except Exception as e:  # noqa: BLE001 - sem chave: devolve o título
-            return {"caption": tkcaptions.fallback(item), "ai": False, "reason": str(e)[:160]}
-        return {"caption": tkcaptions.generate(client, item, kind), "ai": True}
+            return {"caption": tkcaptions.fallback(item, st.cfg().tiktok_base_tags), "ai": False, "reason": str(e)[:160]}
+        return {"caption": tkcaptions.generate(client, item, kind, None, st.cfg().tiktok_base_tags), "ai": True}
 
     @app.post("/api/tiktok/post")
     def post(body: PostBody) -> dict:

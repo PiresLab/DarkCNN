@@ -35,7 +35,8 @@ def post_params(item: dict, kind: str, spec: Any, index: int, caption: str) -> P
         delay = 0  # o TikTok não agenda vídeo privado
     return PostOptions(account=t.account or "", caption=caption, visibility=t.visibility, schedule_s=delay or None,
                        ai_label=t.ai_label if kind == "narration" else False, allow_comment=t.allow_comment,
-                       allow_duet=t.allow_duet, allow_stitch=t.allow_stitch)
+                       allow_duet=t.allow_duet, allow_stitch=t.allow_stitch,
+                       allow_content_reuse=t.allow_content_reuse, allow_ai_remix=t.allow_ai_remix)
 
 
 def enqueue_posts(store: Any, cfg: Config, spec: Any, review: str, preset_id: str | None,
@@ -62,7 +63,8 @@ def enqueue_posts(store: Any, cfg: Config, spec: Any, review: str, preset_id: st
         review_id = folder.name
     jobs = []
     for i, item in enumerate(items):
-        caption = captions.generate(client, item, kind, spec.niche) if client else captions.fallback(item)
+        caption = captions.generate(client, item, kind, spec.niche, cfg.tiktok_base_tags) if client \
+            else captions.fallback(item, cfg.tiktok_base_tags)
         opts = post_params(item, kind, spec, i, caption)
         jobs.append(store.enqueue(
             "post", cfg, str(folder / str(item["file"])), f"TikTok: {item.get('title') or item['file']}",

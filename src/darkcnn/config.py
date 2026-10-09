@@ -58,7 +58,6 @@ class Config(BaseModel):
                       "frases fluidas, pausas curtas nas vírgulas e ênfase nas frases de efeito. "
                       "Leia somente o texto abaixo, sem acrescentar nada.")
     tts_speed: float = Field(1.0, ge=0.8, le=1.5)  # aplicado depois, sem mudar o tom (atempo do FFmpeg)
-    tts_min_interval_s: float = Field(7.0, ge=0.0)  # espaço entre chamadas (o TTS tem limite por minuto)
     tts_retries: int = Field(3, ge=0)
     tts_timeout_s: float = 180.0
     gameplay_dir: Path | None = Field(default_factory=storage.default_gameplays)  # gameplays de fundo
@@ -78,7 +77,6 @@ class Config(BaseModel):
     visual_window_min: float = 10.0  # minutos de vídeo por chamada ao Gemini
     visual_fps: int = 2  # quadros/s do vídeo enviado (o Gemini amostra ~1 fps)
     proxy_height: int = 360  # altura do vídeo enviado ao Gemini
-    visual_pause_s: float = 15.0  # espera entre janelas (o limite de tokens/min do free tier)
 
     # --- seleção dos cortes ---
     min_clip_s: float = Field(30.0, gt=0)
@@ -106,6 +104,11 @@ class Config(BaseModel):
     preset: str = "medium"
     crf: int = 20
     watermark: WatermarkCfg = WatermarkCfg()
+
+    # --- TikTok ---
+    # hashtags de alcance: 3 delas (sorteadas) entram em cada legenda gerada pela IA, antes das 3 do assunto. A IA não vê
+    # tendências em tempo real: mantenha esta lista conforme o que está em alta.
+    tiktok_base_tags: list[str] = ["fy", "fyp", "foryou", "parati", "viral"]
 
     # --- procedência (vai para o review.md) ---
     source: str | None = None  # URL ou descrição da fonte

@@ -109,11 +109,8 @@ class ApiErr(Exception):
 
 def gemini_backend(client, **kw):
     sleeps: list[float] = []
-    clock = [0.0]
-    kw.setdefault("min_interval_s", 0.0)
     b = tts.GeminiTTSBackend("chave", "modelo-tts", style="Narre bem.", client=client,
-                             sleep=lambda s: (sleeps.append(s), clock.__setitem__(0, clock[0] + s)),
-                             clock=lambda: clock[0], backoff_s=10.0, **kw)
+                             sleep=sleeps.append, backoff_s=10.0, **kw)
     return b, sleeps
 
 
@@ -173,12 +170,12 @@ def test_gemini_backend_does_not_retry_a_rejected_request(tmp_path):
 
 
 @needs_ffmpeg
-def test_gemini_backend_spaces_the_calls(tmp_path):
+def test_gemini_backend_does_not_throttle_calls(tmp_path):
     client = FakeGenaiClient()
-    b, sleeps = gemini_backend(client, min_interval_s=7.0)
+    b, sleeps = gemini_backend(client)
     b.say("um", "Kore", tmp_path / "a.wav")
     b.say("dois", "Kore", tmp_path / "b.wav")
-    assert sleeps == [7.0]  # só a 2ª chamada espera
+    assert sleeps == [] and len(client.calls) == 2  # sem espera proativa entre chamadas
 
 
 def test_missing_api_key_is_a_clear_error(tmp_path):
@@ -189,8 +186,8 @@ def test_missing_api_key_is_a_clear_error(tmp_path):
 
 def test_make_backend_uses_the_config(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
-    b = tts.make_backend(Config(tts_model="m", tts_speed=1.1, tts_min_interval_s=3))
-    assert isinstance(b, tts.GeminiTTSBackend) and b.model == "m" and b.speed == 1.1 and b.min_interval_s == 3
+    b = tts.make_backend(Config(tts_model="m", tts_speed=1.1, tts_retries=5))
+    assert isinstance(b, tts.GeminiTTSBackend) and b.model == "m" and b.speed == 1.1 and b.retries == 5
 
 
 # ---------------------------------------------------------------- tic-tac da contagem

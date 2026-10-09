@@ -144,6 +144,12 @@ Por isso:
 - Se o envio cair na hora de publicar, o painel avisa *"pode ou não ter sido postado"* e **não repete sozinho**: confira
   a conta antes. Falhas antes de publicar são repetidas até 2 vezes, sem risco de duplicar.
 - Narrações usam voz sintética: o rótulo de IA vem ligado por padrão.
+- A publicação segue o corpo que o TikTok Studio envia hoje (`darkcnn/tiktok/client.py`: campos de reutilização/remix e
+  metadados do vídeo, que o autotok 2.0.1 não manda; sem eles o TikTok recusava com "Invalid parameters", código 5).
+  Se o TikTok recusar, o log da execução mostra o que foi enviado e a resposta completa dele.
+- **Hashtags da IA:** cada legenda leva 3 hashtags de alcance sorteadas da lista de Configurações → TikTok (padrão
+  `#fy #fyp #foryou #parati #viral`) e 3 do assunto escolhidas pelo Gemini. A IA não vê tendências em tempo real:
+  atualize a lista conforme o que está em alta.
 - Fora do Docker o Chromium precisa existir: `python -m playwright install chromium` (ou `AUTOTOK_BROWSER_CHANNEL=chrome`
   para usar o Chrome instalado). Navegador na nuvem (Browserbase/Steel): `AUTOTOK_BROWSER`, veja o README do autotok.
 - Plano B sem navegador: *Importar sessão manualmente* (cookies `sessionid` e `tt-target-idc`).
@@ -195,9 +201,9 @@ abertura (saudação, "você sabia que", sem pergunta/"você", mais de ~16 palav
 Usa a mesma `GEMINI_API_KEY` do resto. Sem instalar nada: a voz vem do próprio Gemini (vozes prontas como `Kore`,
 `Puck`, `Charon`…), em português do Brasil, com o estilo definido em `tts_style`.
 - **Poucas requisições:** a voz é pedida por bloco, então um vídeo de `curiosidade`/`e-se` gasta **1 requisição de voz**;
-  `voce-prefere` gasta uma por pergunta. O TTS tem limite próprio (por minuto e por dia) e `tts_min_interval_s`
-  espaça as chamadas. **Não confirmei se o free tier inclui TTS** (as fontes divergem): olhe a página de limites do
-  AI Studio e rode `darkcnn voices --models`.
+  `voce-prefere` gasta uma por pergunta. As chamadas de voz não têm espera entre si; se o Gemini devolver
+  erro temporário (429/5xx), há novas tentativas com espera crescente (`tts_retries`). Rode `darkcnn voices --models`
+  para ver os modelos de voz que a sua chave enxerga.
 - **ID do modelo e vozes mudam** (os modelos TTS são "preview"): `tts_model` e `tts_voice` ficam no `config.yaml`.
 - **Qualidade:** ouça as vozes com `voices --say ... --all`, ajuste `tts_style` (tom, ritmo) e `tts_speed` (1.1 deixa
   mais "de short"). `tts_voices_pool: [Kore, Puck, Charon]` sorteia uma voz por vídeo.
@@ -245,8 +251,8 @@ corrige. Cada janela fica em cache: se uma falhar, as outras não são refeitas.
 - **Calibrar o `shots`:** compilações têm muitos cortes. Se o número de planos parecer baixo ou alto demais,
   ajuste com `--scene-threshold` (menor = mais cortes; padrão 0.30). Vídeo contínuo sem cortes é dividido a cada
   `max_shot_s` (12 s) para ter onde cortar.
-- **Custo no free tier:** ≈ 100 mil tokens por 10 min de vídeo (medido). O log mostra a estimativa antes de enviar.
-  Há uma pausa entre janelas (`visual_pause_s`) por causa do limite de tokens por minuto.
+- **Custo:** ≈ 100 mil tokens por 10 min de vídeo (medido). O log mostra a estimativa antes de enviar. As janelas
+  são enviadas em sequência, sem pausa; o único limite é `daily_request_budget` (requisições por dia).
 - **Confira os nomes:** títulos como "Fulano nocauteia Sicrano" vêm do Gemini e podem estar errados. O prompt
   manda não citar nomes sem ter certeza, e o `review.md` avisa para conferir.
 

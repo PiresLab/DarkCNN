@@ -25,6 +25,8 @@ export default function PostModal({ r, item, onClose }: { r: Review; item: Revie
   const [comment, setComment] = useState(true);
   const [duet, setDuet] = useState(false);
   const [stitch, setStitch] = useState(false);
+  const [reuse, setReuse] = useState(true);
+  const [remix, setRemix] = useState(true);
 
   const suggest = useMutation({
     mutationFn: () => api<{ caption: string; ai: boolean; reason?: string }>("/tiktok/caption", { method: "POST", json: { review_id: r.id, rank: item.rank } }),
@@ -37,7 +39,7 @@ export default function PostModal({ r, item, onClose }: { r: Review; item: Revie
   const post = useMutation({
     mutationFn: () => api<Job>("/tiktok/post", { method: "POST", json: {
       review_id: r.id, rank: item.rank,
-      options: { account: account || accounts[0]?.name, caption, visibility, schedule_s: delay, ai_label: aiLabel, allow_comment: comment, allow_duet: duet, allow_stitch: stitch },
+      options: { account: account || accounts[0]?.name, caption, visibility, schedule_s: delay, ai_label: aiLabel, allow_comment: comment, allow_duet: duet, allow_stitch: stitch, allow_content_reuse: reuse, allow_ai_remix: remix },
     } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["tiktok-posts"] }); qc.invalidateQueries({ queryKey: ["jobs"] }); toast("Enviando para o TikTok…"); onClose(); },
     onError: (e: Error) => toast(e.message, "bad"),
@@ -82,6 +84,8 @@ export default function PostModal({ r, item, onClose }: { r: Review; item: Revie
             <Toggle checked={comment} onChange={setComment} label="Permitir comentários" />
             <Toggle checked={duet} onChange={setDuet} label="Permitir duetos" />
             <Toggle checked={stitch} onChange={setStitch} label="Permitir stitch" />
+            <Toggle checked={reuse} onChange={setReuse} label="Permitir reutilização do conteúdo" />
+            <Toggle checked={remix} onChange={setRemix} label="Permitir remix com IA" />
           </div>
         </div>
       )}

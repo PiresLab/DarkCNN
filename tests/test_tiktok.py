@@ -290,7 +290,7 @@ def test_automation_enqueues_staggered_posts(tmp_path):
     db.init()
     store = JobStore(db)
     folder = output(tmp_path, n=3)
-    cfg = Config(workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out")
+    cfg = Config(workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out", tiktok_base_tags=[])
     spec = presets.PresetSpec(tiktok=presets.TikTokSpec(enabled=True, account="canal", delay_min=30, stagger_min=45))
     plans = [captions.CaptionPlan(caption=f"Legenda {i}", hashtags=["curiosidades"]) for i in range(3)]
     jobs = autopost.enqueue_posts(store, cfg, spec, str(folder / "review.md"), "p1",
@@ -337,3 +337,189 @@ def test_finished_automation_queues_the_tiktok_posts(tmp_path):
     assert wait_for(lambda: sorted(posted) == ["01_v.mp4", "02_v.mp4"])
     posts = c.get("/api/tiktok/posts").json()["posts"]
     assert {p["file"] for p in posts} == {"01_v.mp4", "02_v.mp4"} and all(p["account"] == "canal" for p in posts)
+
+
+# ---------------------------------------------------------------- navegador real (pula se não houver Chromium/Chrome)
+@pytest.fixture
+def real_driver(monkeypatch):
+    """PlaywrightDriver de verdade: usa o Chromium do Playwright ou, na falta dele, o Chrome instalado."""
+    pytest.importorskip("playwright")
+    from darkcnn.tiktok.login import PlaywrightDriver
+
+    last = None
+    for channel in (None, "chrome"):
+        if channel:
+            monkeypatch.setenv("AUTOTOK_BROWSER_CHANNEL", channel)
+        d = PlaywrightDriver()
+        try:
+            d.launch(None)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            d.close()
+            continue
+        yield d
+        d.close()
+        return
+    pytest.skip(f"sem navegador para o Playwright: {str(last)[:80]}")
+
+
+PAGE = """<body style='margin:0'>
+<input id=a style='position:absolute;left:300px;top:200px;width:200px;height:40px'>
+<iframe srcdoc="<input id=b style='width:180px;height:36px'>" style='position:absolute;left:300px;top:400px;width:260px;height:80px'></iframe>
+</body>"""
+
+
+def test_real_click_then_type_reaches_main_page_and_iframe_fields(real_driver):
+    d = real_driver
+    d.page.set_content(PAGE)
+    d.click(400, 220)
+    d.type("123456")
+    assert d.page.evaluate("document.getElementById('a').value") == "123456"
+    d.click(400, 428)
+    d.type("654321")
+    assert d.page.frames[1].evaluate("document.getElementById('b').value") == "654321"
+
+
+def test_real_type_without_click_focuses_the_first_visible_field(real_driver):
+    d = real_driver
+    d.page.set_content("<body><iframe srcdoc=\"<input id=b>\" style='width:260px;height:80px'></iframe></body>")
+    d.wait(300)
+    d.type("987654")  # nada em foco: o driver acha o campo, inclusive dentro do iframe
+    assert d.page.frames[1].evaluate("document.getElementById('b').value") == "987654"
+
+
+def test_real_new_window_becomes_the_page_shown_and_closing_returns(real_driver):
+    d = real_driver
+    d.page.set_content("<a id=l href='about:blank' target=_blank>x</a><button id=o onclick=\"window.open('about:blank','v')\">abrir</button>")
+    first = d.page
+    d.page.click("#o")
+    d.wait(800)
+    assert d.page is not first
+    d.page.close()
+    d.wait(300)
+    assert d.page is first
+
+
+# ---------------------------------------------------------------- recusa do TikTok
+def invalid_params():
+    return autotok.PublishError("TikTok rejected the post: Invalid parameters (status_code=5)", status_code=5,
+                                status_msg="Invalid parameters", response={"status_code": 5})
+
+
+def test_invalid_parameters_is_reported_with_code_and_response_in_the_log(tmp_path, caplog):
+    import logging
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"\x00")
+    FakeUploader.fail_with = [invalid_params()]
+    with caplog.at_level(logging.WARNING, logger="darkcnn.tiktok.post"), pytest.raises(PostError) as e:
+        post_video(tmp_path, video, PostOptions(account="a", caption="oi", ai_label=True))
+    assert "código 5" in str(e.value) and len(FakeUploader.calls) == 1  # rejeição não é repetida às cegas
+    assert FakeUploader.calls[0][3]["ai_label"] is True  # o rótulo de IA nunca é removido
+    assert any("status_code=5" in r.message and "resposta=" in r.message for r in caplog.records)
+
+
+def test_post_logs_a_summary_of_what_is_sent(tmp_path, caplog):
+    import logging
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"\x00" * 1000)
+    with caplog.at_level(logging.INFO, logger="darkcnn.tiktok.post"):
+        post_video(tmp_path, video, PostOptions(account="canal", caption="oi #a #b", schedule_s=3600))
+    msg = next(r.message for r in caplog.records if "enviando" in r.message)
+    assert "conta=canal" in msg and "agendado=sim" in msg and "2 hashtags" in msg and "rótulo_IA=True" in msg
+
+
+# ---------------------------------------------------------------- corpo de publicação do Studio
+def test_studio_client_sends_the_body_tiktok_studio_sends_today():
+    from darkcnn.tiktok.client import StudioClient
+    c = StudioClient(autotok.Account(name="a", cookies=[{"name": "sessionid", "value": "x", "domain": ".tiktok.com"}]))
+    c.video_meta = {"width": 1080, "height": 1920}
+    c.allow_content_reuse, c.allow_ai_remix = True, True
+    d = c._payload("cid", "vid", "oi", "oi", [], 0, True, False, False, True)
+    priv = d["feature_common_info_list"][0]["privacy_setting_info"]
+    assert priv == {"visibility_type": 0, "allow_duet": 0, "allow_stitch": 0, "allow_comment": 1,
+                    "allow_content_reuse": 1, "allow_ai_remix": 1}
+    assert d["feature_common_info_list"][0]["aigc_info"] == {"aigc_label_type": 1}
+    post = d["single_post_req_list"][0]["single_post_feature_info"]
+    assert (post["cloud_edit_video_width"], post["cloud_edit_video_height"]) == (1080, 1920)
+    assert post["has_original_audio"] == 1 and post["is_upload_audio_track"] is False
+    assert post["cloud_edit_is_use_video_canvas"] is False
+
+    c.allow_content_reuse, c.allow_ai_remix = False, False
+    d = c._payload("cid", "vid", "oi", "oi", [], 0, True, False, False, False)
+    assert d["feature_common_info_list"][0]["privacy_setting_info"]["allow_ai_remix"] == 2  # 2 = não permitir
+    assert d["feature_common_info_list"][0]["privacy_setting_info"]["allow_content_reuse"] == 0
+    assert "aigc_info" not in d["feature_common_info_list"][0]
+
+
+def test_post_video_configures_the_client_with_the_options(tmp_path):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"\x00")
+    seen = []
+
+    class Configurable(FakeUploader):
+        def configure(self, *, allow_content_reuse, allow_ai_remix, video):
+            seen.append((allow_content_reuse, allow_ai_remix, Path(video).name))
+
+    post_video(tmp_path, video, PostOptions(account="a", caption="oi", allow_ai_remix=False),
+               client_factory=lambda name: Configurable(name))
+    assert seen == [(True, False, "v.mp4")]
+
+
+def test_post_options_default_to_studio_defaults_and_flow_from_automation():
+    o = PostOptions(account="a", caption="x")
+    assert o.allow_content_reuse is True and o.allow_ai_remix is True
+    t = presets.TikTokSpec(enabled=True, account="a", allow_ai_remix=False)
+    opts = autopost.post_params({"title": "t"}, "narration", presets.PresetSpec(tiktok=t), 0, "oi")
+    assert opts.allow_ai_remix is False and opts.allow_content_reuse is True
+
+
+# ---------------------------------------------------------------- hashtags de alcance + do assunto
+def test_compose_puts_reach_tags_first_then_the_subject_tags_without_duplicates():
+    import random
+    base = ["fy", "fyp", "foryou", "parati", "viral"]
+    out = captions.compose("Você sabia?", ["#Ciência", "fyp", "internet", "tecnologia", "extra"], base, random.Random(1))
+    tags = out.split(" ", 2)[2].split()  # depois de "Você sabia?"
+    assert len(tags) == 6 and len(set(t.lower() for t in tags)) == 6  # teto de 6, sem repetir
+    assert {t[1:] for t in tags[:3]} <= set(base)  # as 3 primeiras são de alcance
+    assert "#Ciencia" in tags[3:] and len([t for t in tags if t.lower() == "#fyp"]) <= 1  # "fyp" da IA não repete a base
+
+
+def test_compose_with_short_or_empty_base_list():
+    import random
+    assert captions.compose("oi", ["a", "b", "c"], [], random.Random(0)) == "oi #a #b #c"
+    out = captions.compose("oi", ["a"], ["fy", "#fyy"], random.Random(0))
+    assert sorted(out.split()[1:3]) == ["#fy", "#fyy"] and out.endswith("#a")  # base curta entra inteira
+
+
+def test_compose_keeps_emoji_in_the_caption():
+    assert captions.compose("Final chocante \U0001F631", ["x"]) == "Final chocante \U0001F631 #x"
+
+
+def test_generate_and_fallback_use_the_configured_reach_tags():
+    import random
+    plan = captions.CaptionPlan(caption="Olha só", hashtags=["internet", "apocalipse", "tecnologia"])
+    item = {"title": "Internet fora", "lines": [{"text": "Fato."}]}
+    out = captions.generate(FakeCaptionClient(plan), item, "narration", None, ["fy", "fyp", "viral"], random.Random(3))
+    tags = out.split()[2:]
+    assert sorted(tags[:3]) == ["#fy", "#fyp", "#viral"] and tags[3:] == ["#internet", "#apocalipse", "#tecnologia"]
+    fb = captions.fallback(item, ["fy", "fyp", "viral"], random.Random(3))
+    assert fb.startswith("Internet fora #") and "#curiosidades" in fb and "#fy" in fb
+
+
+def test_prompt_asks_for_three_subject_hashtags_and_no_reach_tags():
+    from darkcnn.analyze import PROMPTS_DIR
+    prompt = (PROMPTS_DIR / "caption_v1.md").read_text(encoding="utf-8")
+    assert "exatamente 3 hashtags" in prompt and "NÃO inclua hashtags de alcance" in prompt
+
+
+def test_base_tags_are_saved_through_the_config_api(tmp_path):
+    c, st = app(tmp_path)
+    assert c.get("/api/config").json()["effective"]["tiktok_base_tags"] == ["fy", "fyp", "foryou", "parati", "viral"]
+    assert c.put("/api/config", json={"values": {"tiktok_base_tags": ["fy", "fyy", "xyzbca"]}}).status_code == 200
+    assert st.cfg().tiktok_base_tags == ["fy", "fyy", "xyzbca"]
+    # a legenda sugerida no modal usa a lista salva
+    output(tmp_path)
+    plan = captions.CaptionPlan(caption="Olha", hashtags=["internet"])
+    st.caption_client = lambda: FakeCaptionClient(plan)
+    cap = c.post("/api/tiktok/caption", json={"review_id": "narrate/abc", "rank": 1}).json()["caption"]
+    assert {"#fy", "#fyy", "#xyzbca"} <= set(cap.split()) and cap.endswith("#internet")

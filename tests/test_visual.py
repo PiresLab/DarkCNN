@@ -98,25 +98,22 @@ class PerCall(FakeBackend):
 
 
 @needs_ffmpeg
-def test_select_visual_windows_cache_pause_and_reconcile(tmp_path):
+def test_select_visual_windows_cache_and_reconcile(tmp_path):
     video = make_cut_video(tmp_path / "v.mp4")
     cfg = Config(min_clip_s=8, max_clip_s=25, clips_per_video=2, visual_window_min=0.5, proxy_height=144, judge=False,
-                 visual_pause_s=7, workspace_dir=tmp_path / "ws")
+                 workspace_dir=tmp_path / "ws")
     # 2 janelas de 30 s: planos 0-2 e 3-5. A 2ª resposta lê o número errado (usa IDs da janela 1)
     backend = PerCall([[vc(1, 2, "00:10", "00:30", score=9)], [vc(1, 2, "00:10", "00:30", score=8)]])
     client = GeminiClient(backend, tmp_path / "u.json", 40, sleep=lambda s: None)
-    sleeps = []
     ws = tmp_path / "ws" / "vid"
 
-    out, st = V.select_visual(video, "vid", ws, SH, cfg, lambda: client, sleep=sleeps.append)
+    out, st = V.select_visual(video, "vid", ws, SH, cfg, lambda: client)
     assert st == {"windows": 2, "api_calls": 2, "reconciled": 2} and backend.calls == 2
-    assert sleeps == [7]  # pausa só ENTRE chamadas reais
     assert [(c["start_id"], c["end_id"]) for c in out] == [(1, 2), (4, 5)]  # a janela 2 foi corrigida pelo tempo
     assert not list((ws / "proxy").glob("*.mp4"))  # proxies apagados depois do uso
 
-    sleeps.clear()
-    out2, st2 = V.select_visual(video, "vid", ws, SH, cfg, lambda: client, sleep=sleeps.append)
-    assert st2["api_calls"] == 0 and backend.calls == 2 and sleeps == [] and out2 == out  # tudo em cache
+    out2, st2 = V.select_visual(video, "vid", ws, SH, cfg, lambda: client)
+    assert st2["api_calls"] == 0 and backend.calls == 2 and out2 == out  # tudo em cache
 
-    V.select_visual(video, "vid", ws, SH, cfg, lambda: client, force=True, sleep=sleeps.append)
+    V.select_visual(video, "vid", ws, SH, cfg, lambda: client, force=True)
     assert backend.calls == 4

@@ -3,10 +3,14 @@ import { Gamepad2 } from "lucide-react";
 import clsx from "clsx";
 import { ChoiceCard, Field, Segmented, Toggle } from "./ui";
 import { FORMATS, MODES } from "../lib/labels";
-import { useGameplays, useTikTok, useVoices } from "../lib/hooks";
+import { useConfig, useGameplays, useTikTok, useVoices } from "../lib/hooks";
 import { defaultTikTok, type Mode, type PresetSpec, type TikTokSpec } from "../lib/types";
 
 type Set = (patch: Partial<PresetSpec>) => void;
+
+/** Quantos vídeos/cortes uma execução entrega (narração: `count`; cortes e compilado: `clips`). */
+export const outputs = (spec: PresetSpec, defaultClips: number) =>
+  spec.mode === "narrate" ? spec.count : (spec.clips ?? defaultClips);
 
 /** Passo 1: tipo de vídeo. */
 export function ModeStep({ spec, set }: { spec: PresetSpec; set: Set }) {
@@ -22,6 +26,7 @@ export function ModeStep({ spec, set }: { spec: PresetSpec; set: Set }) {
 /** Passo 2: conteúdo. */
 export function ContentStep({ spec, set }: { spec: PresetSpec; set: Set }) {
   const narrate = spec.mode === "narrate";
+  const defaultClips = useConfig().data?.effective.clips_per_video ?? 5;
   return (
     <div className="space-y-5">
       {narrate && (
@@ -71,9 +76,17 @@ export function ContentStep({ spec, set }: { spec: PresetSpec; set: Set }) {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label={narrate ? "Quantos vídeos" : "Quantos cortes"}>
-          <input type="number" min={1} max={10} className="input" value={spec.count} onChange={(e) => set({ count: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
-        </Field>
+        {narrate ? (
+          <Field label="Quantos vídeos">
+            <input type="number" min={1} max={10} className="input" value={spec.count} onChange={(e) => set({ count: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
+          </Field>
+        ) : (
+          <Field label={spec.mode === "compile" ? "Momentos no top" : "Quantos cortes"}
+            hint={spec.clips ? undefined : "Vazio: usa o valor de Configurações."}>
+            <input type="number" min={1} max={12} className="input" value={spec.clips ?? ""} placeholder={String(defaultClips)}
+              onChange={(e) => set({ clips: e.target.value === "" ? null : Math.max(1, Math.min(12, Number(e.target.value) || 1)) })} />
+          </Field>
+        )}
         {narrate && (
           <Field label="Duração aproximada" hint={`${spec.target_s} segundos`}>
             <input type="range" min={20} max={120} step={5} className="w-full accent-[rgb(var(--brand))]" value={spec.target_s} onChange={(e) => set({ target_s: Number(e.target.value) })} />
@@ -124,6 +137,7 @@ export function LookStep({ spec, set }: { spec: PresetSpec; set: Set }) {
 /** Passo "TikTok": postar sozinho ao terminar de gerar. */
 export function TikTokStep({ spec, set }: { spec: PresetSpec; set: Set }) {
   const tk = useTikTok();
+  const defaultClips = useConfig().data?.effective.clips_per_video ?? 5;
   const t = spec.tiktok ?? defaultTikTok();
   const up = (p: Partial<TikTokSpec>) => set({ tiktok: { ...t, ...p } });
   const accounts = (tk.data?.accounts ?? []).filter((a) => a.connected);
@@ -157,7 +171,7 @@ export function TikTokStep({ spec, set }: { spec: PresetSpec; set: Set }) {
                   {!delayOptions.some(([m]) => m === t.delay_min) && <option value={-1}>{t.delay_min} minutos depois</option>}
                 </select>
               </Field>
-              {spec.count > 1 && (
+              {outputs(spec, defaultClips) > 1 && (
                 <Field label="Intervalo entre os vídeos" hint="Postar vários de uma vez parece spam.">
                   <select className="input" value={t.stagger_min} onChange={(e) => up({ stagger_min: Number(e.target.value) })}>
                     {[15, 30, 60, 120, 240, 720].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutos` : `${m / 60} hora${m > 60 ? "s" : ""}`}</option>)}
@@ -172,6 +186,8 @@ export function TikTokStep({ spec, set }: { spec: PresetSpec; set: Set }) {
             <Toggle checked={t.allow_comment} onChange={(v) => up({ allow_comment: v })} label="Permitir comentários" />
             <Toggle checked={t.allow_duet} onChange={(v) => up({ allow_duet: v })} label="Permitir duetos" />
             <Toggle checked={t.allow_stitch} onChange={(v) => up({ allow_stitch: v })} label="Permitir stitch" />
+            <Toggle checked={t.allow_content_reuse} onChange={(v) => up({ allow_content_reuse: v })} label="Permitir reutilização do conteúdo" />
+            <Toggle checked={t.allow_ai_remix} onChange={(v) => up({ allow_ai_remix: v })} label="Permitir remix com IA" />
           </div>
         </>
       )}

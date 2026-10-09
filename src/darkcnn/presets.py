@@ -28,6 +28,8 @@ class TikTokSpec(BaseModel):
     allow_comment: bool = True
     allow_duet: bool = False
     allow_stitch: bool = False
+    allow_content_reuse: bool = True
+    allow_ai_remix: bool = True
 
     @model_validator(mode="after")
     def _check(self) -> "TikTokSpec":
@@ -42,7 +44,8 @@ class PresetSpec(BaseModel):
     mode: Literal["narrate", "run", "compile"] = "narrate"  # run = cortes de um vídeo
     # --- conteúdo ---
     narrate_format: str = "curiosidade"
-    count: int = Field(1, ge=1, le=10)
+    count: int = Field(1, ge=1, le=10)  # narração: quantos vídeos por execução
+    clips: int | None = Field(None, ge=1, le=12)  # cortes / momentos do top; vazio = o valor de Configurações
     target_s: float = Field(45.0, gt=5)
     niche: str | None = None  # dica livre para a IA: "ciência e espaço", "futebol", "dinheiro"...
     auto_topic: bool = True  # a IA propõe o tema a cada execução
@@ -92,6 +95,8 @@ def build_config(base: dict, spec: PresetSpec, gameplay_dir: Path | None, db: Da
     data: dict[str, Any] = dict(base)
     data.update({"narrate_format": spec.narrate_format, "count": spec.count, "target_s": spec.target_s,
                  "profile": spec.profile})
+    if spec.mode in ("run", "compile") and spec.clips:
+        data["clips_per_video"] = spec.clips
     if spec.tts_voice:
         data["tts_voice"] = spec.tts_voice
     if spec.tts_voices_pool:

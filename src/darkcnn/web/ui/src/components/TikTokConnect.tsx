@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, Loader2, Plug, ShieldCheck, Trash2 } from 
 import clsx from "clsx";
 import { Badge, Collapsible, Field, Modal, useToast } from "./ui";
 import { api } from "../lib/api";
-import { useTikTok } from "../lib/hooks";
+import { useConfig, useTikTok } from "../lib/hooks";
 import type { LoginView } from "../lib/types";
 
 /** Navegador remoto: mostra a página de login do TikTok (QR code) e repassa cliques e teclas ao servidor. */
@@ -23,8 +23,9 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
     onError: (e: Error) => toast(e.message, "bad"),
   });
   const view = useQuery({
-    queryKey: ["tiktok-login", sid], enabled: !!sid, queryFn: () => api<LoginView>(`/tiktok/login/${sid}`),
-    refetchInterval: (q) => (q.state.data && !["starting", "waiting"].includes(q.state.data.status) ? false : 1000),
+    queryKey: ["tiktok-login", sid], enabled: !!sid, refetchIntervalInBackground: true,  // segue ao ir buscar o código no e-mail
+    queryFn: () => api<LoginView>(`/tiktok/login/${sid}`),
+    refetchInterval: (q) => (q.state.data && !["starting", "waiting"].includes(q.state.data.status) ? false : 600),
   });
   const v = view.data;
   const connected = v?.status === "connected";
@@ -32,12 +33,27 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
     if (connected) { qc.invalidateQueries({ queryKey: ["tiktok"] }); toast("TikTok conectado"); }
   }, [connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const send = (path: string, json: unknown) => sid && api(`/tiktok/login/${sid}/${path}`, { method: "POST", json }).catch(() => {});
+  // os comandos saem em fila, um por vez: um código de 6 dígitos não pode chegar embaralhado
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
+  const send = (path: string, json: unknown) => {
+    if (!sid) return;
+    chain.current = chain.current.then(() => api(`/tiktok/login/${sid}/${path}`, { method: "POST", json })).catch(() => {});
+  };
+  const [pulse, setPulse] = useState<{ x: number; y: number; k: number } | null>(null);
   const close = () => { if (sid && v && ["starting", "waiting"].includes(v.status)) api(`/tiktok/login/${sid}`, { method: "DELETE" }).catch(() => {}); onClose(); };
   const onImgClick = (e: React.MouseEvent<HTMLImageElement>) => {
     const r = img.current!.getBoundingClientRect();
+    setPulse({ x: e.clientX - r.left, y: e.clientY - r.top, k: Date.now() });  // confirma onde o clique foi
+    img.current!.parentElement!.focus();  // a partir daqui as teclas vão para a página remota
     send("click", { x: ((e.clientX - r.left) / r.width) * v!.viewport.width, y: ((e.clientY - r.top) / r.height) * v!.viewport.height });
   };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key.length === 1) { e.preventDefault(); send("type", { text: e.key }); }
+    else if (["Enter", "Backspace", "Tab", "Escape", "Delete"].includes(e.key)) { e.preventDefault(); send("key", { key: e.key }); }
+  };
+  const onPaste = (e: React.ClipboardEvent) => { const t = e.clipboardData.getData("text"); if (t) { e.preventDefault(); send("type", { text: t }); } };
 
   return (
     <Modal open onClose={close} wide title="Conectar TikTok"
@@ -71,21 +87,51 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm text-muted">{v?.status === "waiting" ? "Escaneie o QR code com o app do TikTok. Se a página pedir outra coisa, clique nela aqui mesmo." : "Abrindo o navegador no servidor…"}</p>
-          <div className="relative mx-auto max-w-[760px] overflow-hidden rounded-xl border bg-black">
+          <p className="text-sm text-muted">{v?.status === "waiting" ? "Escaneie o QR code com o app do TikTok. Se pedir verificação (código por e-mail), clique no campo aqui na imagem e digite: o teclado vai direto para a página." : "Abrindo o navegador no servidor…"}</p>
+          <div tabIndex={0} onKeyDown={onKey} onPaste={onPaste} aria-label="Navegador remoto: clique num campo e digite"
+            className="relative mx-auto max-w-[760px] overflow-hidden rounded-xl border bg-black outline-none focus-visible:ring-2 focus-visible:ring-brand">
+            {pulse && <span key={pulse.k} className="pointer-events-none absolute z-10 h-6 w-6 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border-2 border-brand" style={{ left: pulse.x, top: pulse.y }} />}
             {v?.image ? <img ref={img} src={v.image} alt="Página de login do TikTok" className="block w-full cursor-pointer select-none" onClick={onImgClick} draggable={false} />
               : <div className="grid aspect-[1000/680] place-items-center text-muted"><Loader2 className="h-6 w-6 animate-spin" /></div>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <input className="input !w-64" value={text} onChange={(e) => setText(e.target.value)} placeholder="Texto para digitar na página"
+            <input className="input !w-64" value={text} onChange={(e) => setText(e.target.value)} placeholder="Ou cole/digite o código aqui"
               onKeyDown={(e) => { if (e.key === "Enter" && text) { send("type", { text }); setText(""); } }} />
-            <button className="btn-secondary" disabled={!text} onClick={() => { send("type", { text }); setText(""); }}>Digitar</button>
+            <button className="btn-secondary" disabled={!text} onClick={() => { send("type", { text }); setText(""); }}>Enviar ao campo</button>
             {["Enter", "Backspace", "Tab"].map((k) => <button key={k} className="btn-ghost !px-2 text-xs" onClick={() => send("key", { key: k })}>{k}</button>)}
           </div>
-          <p className="flex items-start gap-1.5 text-xs text-muted"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />Se você digitar e-mail e senha aqui, as teclas passam pelo servidor do DarkCNN (não são gravadas). Prefira o QR code.</p>
+          <p className="flex items-start gap-1.5 text-xs text-muted"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />O texto vai para o campo em foco (ou para o primeiro campo visível). Se você digitar e-mail e senha aqui, as teclas passam pelo servidor do DarkCNN (não são gravadas). Prefira o QR code.</p>
         </div>
       )}
     </Modal>
+  );
+}
+
+const parseTags = (raw: string) => [...new Set(raw.split(/[\s,;]+/).map((t) => t.replace(/^#+/, "").trim()).filter(Boolean))];
+
+/** Hashtags de alcance: 3 delas (sorteadas) entram em cada legenda gerada pela IA, antes das 3 do assunto. */
+function BaseTags() {
+  const cfg = useConfig();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const saved: string[] = cfg.data?.effective.tiktok_base_tags ?? [];
+  const [text, setText] = useState<string | null>(null);
+  const value = text ?? saved.map((t) => `#${t}`).join(" ");
+  const tags = parseTags(value);
+  const save = useMutation({
+    mutationFn: () => api("/config", { method: "PUT", json: { values: { tiktok_base_tags: tags } } }),
+    onSuccess: () => { setText(null); qc.invalidateQueries({ queryKey: ["config"] }); toast("Hashtags salvas"); },
+    onError: (e: Error) => toast(e.message, "bad"),
+  });
+  return (
+    <div className="mt-4">
+      <Field label="Hashtags de alcance" hint="Entram 3 delas, sorteadas, em cada legenda gerada pela IA, antes das 3 do assunto. A IA não vê o que está em alta: mantenha esta lista atualizada.">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input className="input font-mono" value={value} onChange={(e) => setText(e.target.value)} placeholder="#fy #fyp #foryou #parati #viral" />
+          <button className="btn-secondary shrink-0" disabled={text === null || save.isPending} onClick={() => save.mutate()}>Salvar</button>
+        </div>
+      </Field>
+    </div>
   );
 }
 
@@ -147,10 +193,10 @@ export function TikTokCard() {
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button className={clsx("btn-primary")} onClick={() => setConnecting(true)}><Plug className="h-4 w-4" />Conectar TikTok</button>
-            <span className="text-xs text-muted">Uso não oficial da API web do TikTok: a conta pode ser limitada. Use só contas suas.</span>
           </div>
+          <BaseTags />
           <div className="mt-4">
-            <Collapsible title="Importar sessão manualmente (plano B)">
+            <Collapsible title="Importar sessão manualmente">
               <p className="mb-3 text-xs text-muted">Copie os cookies <code>sessionid</code> e <code>tt-target-idc</code> do tiktok.com (DevTools → Application → Cookies). O <code>sessionid</code> dá acesso total à conta: nunca compartilhe.</p>
               <div className="grid gap-3 sm:grid-cols-3">
                 <Field label="Nome"><input className="input" value={imp.name} onChange={(e) => setImp({ ...imp, name: e.target.value })} /></Field>
