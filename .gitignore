@@ -19,4 +19,4 @@ node_modules/
 src/darkcnn/web/static/
 .thumbs/
 .claude/
-tiktok/
+/tiktok/
