@@ -21,7 +21,9 @@ from .. import media, presets as presetlib, runctx, storage
 from ..config import Config
 from ..db import Database, Job, JobLog
 
-MODES = {"run", "compile", "render", "narrate", "auto"}
+log = logging.getLogger(__name__)
+
+MODES = {"run", "compile", "render", "narrate", "auto", "post"}
 ACTIVE = ("queued", "running")
 ADHOC = "adhoc"
 
@@ -45,8 +47,25 @@ def default_runners(store: "JobStore | None" = None) -> dict[str, Callable[..., 
         return autopilot.run_auto(preset_id, cfg, force, spec=spec,
                                   history=store.recent_topics(pid), used_sources=store.used_sources())
 
+    def post(source: str, cfg: Config, force: bool) -> Path:
+        """Publica um vídeo no TikTok. As opções viajam nos params do job (`post`)."""
+        from ..tiktok import post as tkpost
+        job = store.get(runctx.current_job_id() or "") if store else None
+        raw = (job or {}).get("params", {}).get("post")
+        if not raw:
+            raise ValueError("postagem sem opções")
+        try:
+            res = tkpost.post_video(storage.tiktok_dir(cfg.workspace_dir), Path(source), tkpost.PostOptions(**raw))
+        except tkpost.PostError as e:
+            if e.uncertain:
+                runctx.record_params(uncertain=True)
+            raise
+        runctx.record_params(video_id=res.video_id, scheduled_for=res.scheduled_for)
+        return Path(source)
+
     return {
         "auto": auto,
+        "post": post,
         "run": lambda inp, cfg, force: pipeline.run_pipeline(inp, cfg, force=force),
         "compile": lambda inp, cfg, force: pipeline.run_compile(inp, cfg, force=force),
         "render": lambda inp, cfg, force: pipeline.render_from_selection(inp, cfg),
@@ -149,10 +168,24 @@ class JobStore:
         return self.enqueue("auto", cfg, ADHOC, label or spec.narrate_format,
                             {"spec": spec.model_dump(mode="json")})
 
+    def post_jobs(self, limit: int = 300) -> list[dict]:
+        """Postagens no TikTok (mais recentes primeiro), no formato que a biblioteca usa."""
+        with self.db.session() as s:
+            rows = s.scalars(select(Job).where(Job.mode == "post").order_by(Job.created.desc()).limit(limit)).all()
+            out = []
+            for r in rows:
+                p = r.params or {}
+                out.append({"job_id": r.id, "status": r.status, "review_id": p.get("review_id"), "file": p.get("file"),
+                            "account": (p.get("post") or {}).get("account"), "video_id": p.get("video_id"),
+                            "scheduled_for": p.get("scheduled_for"), "uncertain": bool(p.get("uncertain")),
+                            "error": r.error, "created": r.created, "ended": r.ended})
+            return out
+
     def remembered(self, out_dir: Path) -> dict[str, Any]:
         """Fonte/rótulo da última execução que gerou essa pasta (alimenta o botão de re-renderizar)."""
         with self.db.session() as s:
-            j = s.scalars(select(Job).where(Job.output_dir == str(out_dir), Job.status == "done")
+            j = s.scalars(select(Job).where(Job.output_dir == str(out_dir), Job.status == "done",
+                                            Job.mode != "post")
                           .order_by(Job.created.desc()).limit(1)).first()
             if j is None:
                 return {}
@@ -297,6 +330,23 @@ class Worker:
             with self._lock:
                 self._running.pop(job.id, None)
         self.store.finish(job.id, status, review, error)
+        if job.mode == "auto" and status == "done" and review:
+            self._queue_tiktok(job, review)
+
+    def _queue_tiktok(self, job: Job, review: str) -> None:
+        """Automação com 'postar no TikTok' ligado: enfileira uma postagem por vídeo gerado."""
+        try:
+            raw = (job.params or {}).get("spec")
+            if raw is None and job.preset_id:
+                p = presetlib.get(self.store.db, job.preset_id)
+                raw = p.spec if p else None
+            if not raw or not (raw.get("tiktok") or {}).get("enabled"):
+                return
+            from ..tiktok import autopost
+            autopost.enqueue_posts(self.store, Config(**job.config_snapshot), presetlib.PresetSpec(**raw), review,
+                                   job.preset_id)
+        except Exception:  # noqa: BLE001 - falhar em postar nunca desfaz o vídeo gerado
+            log.exception("não consegui enfileirar as postagens do TikTok")
 
 
 class JobManager:

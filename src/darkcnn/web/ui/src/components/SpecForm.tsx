@@ -1,9 +1,10 @@
+import { Link } from "react-router-dom";
 import { Gamepad2 } from "lucide-react";
 import clsx from "clsx";
-import { ChoiceCard, Field, Toggle } from "./ui";
+import { ChoiceCard, Field, Segmented, Toggle } from "./ui";
 import { FORMATS, MODES } from "../lib/labels";
-import { useGameplays, useVoices } from "../lib/hooks";
-import type { Mode, PresetSpec } from "../lib/types";
+import { useGameplays, useTikTok, useVoices } from "../lib/hooks";
+import { defaultTikTok, type Mode, type PresetSpec, type TikTokSpec } from "../lib/types";
 
 type Set = (patch: Partial<PresetSpec>) => void;
 
@@ -83,7 +84,7 @@ export function ContentStep({ spec, set }: { spec: PresetSpec; set: Set }) {
   );
 }
 
-/** Passo 3: voz e gameplay (só narração). */
+/** Passo 3: voz e background (só narração). */
 export function LookStep({ spec, set }: { spec: PresetSpec; set: Set }) {
   const voices = useVoices();
   const games = useGameplays();
@@ -100,9 +101,9 @@ export function LookStep({ spec, set }: { spec: PresetSpec; set: Set }) {
           {(voices.data?.known ?? []).map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
       </Field>
-      <Field label="Gameplay de fundo" hint="Nada selecionado = qualquer gameplay da biblioteca.">
+      <Field label="Background" hint="Nada selecionado = qualquer background da biblioteca.">
         {(games.data ?? []).length === 0 ? (
-          <p className="text-sm text-muted">Você ainda não enviou gameplays. Envie em <b>Gameplays</b>.</p>
+          <p className="text-sm text-muted">Você ainda não enviou backgrounds. Envie em <b>Backgrounds</b>.</p>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {games.data!.map((g) => (
@@ -116,6 +117,64 @@ export function LookStep({ spec, set }: { spec: PresetSpec; set: Set }) {
           </div>
         )}
       </Field>
+    </div>
+  );
+}
+
+/** Passo "TikTok": postar sozinho ao terminar de gerar. */
+export function TikTokStep({ spec, set }: { spec: PresetSpec; set: Set }) {
+  const tk = useTikTok();
+  const t = spec.tiktok ?? defaultTikTok();
+  const up = (p: Partial<TikTokSpec>) => set({ tiktok: { ...t, ...p } });
+  const accounts = (tk.data?.accounts ?? []).filter((a) => a.connected);
+
+  if (tk.data && !tk.data.available)
+    return <p className="text-sm text-muted">O módulo do TikTok não está instalado neste servidor.</p>;
+  if (accounts.length === 0)
+    return <p className="text-sm">Conecte uma conta do TikTok em <Link className="underline" to="/configuracoes">Configurações</Link> para postar automaticamente.</p>;
+  const delayOptions: [number, string][] = [[0, "Assim que ficar pronto"], [15, "15 minutos depois"], [60, "1 hora depois"], [180, "3 horas depois"], [720, "12 horas depois"], [1440, "1 dia depois"]];
+  return (
+    <div className="space-y-5">
+      <Toggle checked={t.enabled} onChange={(v) => up({ enabled: v, account: v ? (t.account ?? accounts[0].name) : t.account })}
+        label="Postar no TikTok ao terminar" hint="Cada vídeo gerado vai para a fila de postagem sozinho. Você acompanha em Execuções." />
+      {t.enabled && (
+        <>
+          <Field label="Conta">
+            <select className="input" value={t.account ?? accounts[0].name} onChange={(e) => up({ account: e.target.value })}>
+              {accounts.map((a) => <option key={a.name}>{a.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Visibilidade">
+            <Segmented value={t.visibility} onChange={(v) => up({ visibility: v, ...(v === "private" ? { delay_min: 0 } : {}) })}
+              options={[{ value: "public", label: "Público" }, { value: "private", label: "Só eu" }]} />
+            {t.visibility === "private" && <p className="hint">O TikTok não agenda vídeos privados: eles são postados na hora.</p>}
+          </Field>
+          {t.visibility === "public" && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Quando postar o 1º vídeo">
+                <select className="input" value={delayOptions.some(([m]) => m === t.delay_min) ? t.delay_min : -1} onChange={(e) => up({ delay_min: Number(e.target.value) })}>
+                  {delayOptions.map(([m, l]) => <option key={m} value={m}>{l}</option>)}
+                  {!delayOptions.some(([m]) => m === t.delay_min) && <option value={-1}>{t.delay_min} minutos depois</option>}
+                </select>
+              </Field>
+              {spec.count > 1 && (
+                <Field label="Intervalo entre os vídeos" hint="Postar vários de uma vez parece spam.">
+                  <select className="input" value={t.stagger_min} onChange={(e) => up({ stagger_min: Number(e.target.value) })}>
+                    {[15, 30, 60, 120, 240, 720].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutos` : `${m / 60} hora${m > 60 ? "s" : ""}`}</option>)}
+                  </select>
+                </Field>
+              )}
+            </div>
+          )}
+          <div className="space-y-2">
+            <Toggle checked={t.caption_ai} onChange={(v) => up({ caption_ai: v })} label="Legenda e hashtags pela IA" hint="Desligado, a legenda é só o título do vídeo." />
+            <Toggle checked={t.ai_label} onChange={(v) => up({ ai_label: v })} label="Marcar narrações como conteúdo gerado por IA" hint="Recomendado: a voz é sintética." />
+            <Toggle checked={t.allow_comment} onChange={(v) => up({ allow_comment: v })} label="Permitir comentários" />
+            <Toggle checked={t.allow_duet} onChange={(v) => up({ allow_duet: v })} label="Permitir duetos" />
+            <Toggle checked={t.allow_stitch} onChange={(v) => up({ allow_stitch: v })} label="Permitir stitch" />
+          </div>
+        </>
+      )}
     </div>
   );
 }

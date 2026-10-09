@@ -45,6 +45,16 @@ class AppState:
                                base_config=self.saved if embedded_worker else None,
                                gameplay_dir=self.gameplay_dir)
 
+    def assets_dir(self) -> Path:
+        """Arquivos enviados pelo usuário que não são gameplay (ex.: marca d'água)."""
+        root = storage.data_root()
+        if root is not None:
+            return root / "assets"
+        try:
+            return Path(self.cfg().workspace_dir).parent / "assets"
+        except (ValidationError, ValueError, yaml.YAMLError):
+            return Path("assets")
+
     def gameplay_dir(self) -> Path:
         """Onde a biblioteca de gameplays mora: o configurado, o volume Docker ou ./gameplays."""
         try:
@@ -95,7 +105,6 @@ def read_review(out_root: Path, folder: Path, extra: dict | None = None) -> dict
     compilation = any(f.name.startswith("compilado") for f in folder.glob("compilado*.mp4"))
     for i, it in enumerate(items, 1):
         it.setdefault("rank", i)
-        it.setdefault("status", "pending")
     return {
         "id": rid,
         "kind": "narration" if narration else ("compilation" if compilation else "cuts"),
@@ -135,7 +144,6 @@ class KeyRequest(BaseModel):
 
 
 class ItemPatch(BaseModel):
-    status: str | None = None
     start: float | None = None
     end: float | None = None
     title: str | None = None
@@ -385,8 +393,10 @@ def create_app(state: AppState | None = None) -> Any:
         return {"voice": voice, "file": dest.relative_to(Path(cfg.output_dir)).as_posix(),
                 "seconds": round(media.probe_duration(dest), 2), "took": round(time.perf_counter() - t0, 1)}
 
-    from . import routes_auto
+    from . import routes_auto, routes_settings, routes_tiktok
     routes_auto.register(app, st)
+    routes_settings.register(app, st)
+    routes_tiktok.register(app, st)
 
     static = Path(__file__).parent / "static"
     if (static / "assets").is_dir():

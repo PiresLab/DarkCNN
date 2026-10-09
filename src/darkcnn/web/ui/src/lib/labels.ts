@@ -1,15 +1,15 @@
 import type { JobStatus, Mode } from "./types";
 
 export const MODES: Record<Mode, { title: string; desc: string; short: string }> = {
-  narrate: { title: "Narração sobre gameplay", short: "Narração",
-    desc: "A IA escreve o roteiro, narra com voz natural e coloca sobre uma gameplay." },
+  narrate: { title: "Narração sobre background", short: "Narração",
+    desc: "A IA escreve o roteiro, narra com voz natural e coloca sobre um vídeo de fundo." },
   run: { title: "Cortes de um vídeo", short: "Cortes",
     desc: "Pega um vídeo longo e separa os melhores momentos em vídeos verticais." },
   compile: { title: "Compilado Top N", short: "Compilado",
     desc: "Monta uma contagem regressiva com os melhores momentos de um tema." },
 };
 export const modeLabel = (m: string) =>
-  (MODES as Record<string, { short: string }>)[m]?.short ?? (m === "auto" ? "Automático" : m === "render" ? "Re-render" : m);
+  (MODES as Record<string, { short: string }>)[m]?.short ?? (m === "post" ? "TikTok" : m === "auto" ? "Automático" : m === "render" ? "Re-render" : m);
 
 export const FORMATS: { id: string; title: string; desc: string }[] = [
   { id: "curiosidade", title: "Curiosidade", desc: "Um fato surpreendente, explicado de forma envolvente." },
@@ -39,11 +39,3 @@ export function stageOf(log: string[], status: string): number {
   return idx;
 }
 
-export const CRON_PRESETS: { label: string; cron: string }[] = [
-  { label: "Todo dia às 09:00", cron: "0 9 * * *" },
-  { label: "Todo dia às 18:00", cron: "0 18 * * *" },
-  { label: "Duas vezes ao dia (09:00 e 19:00)", cron: "0 9,19 * * *" },
-  { label: "A cada 6 horas", cron: "0 */6 * * *" },
-  { label: "Segunda a sexta às 12:00", cron: "0 12 * * 1-5" },
-];
-export const cronLabel = (cron: string) => CRON_PRESETS.find((c) => c.cron === cron)?.label ?? cron;

@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "fastapi", "uvicorn", "httpx", "python-multipart"]
+tiktok = ["autotok>=2.0.1"]  # AGPL-3.0: leia a seção "TikTok" do README
 web = ["fastapi>=0.115", "uvicorn>=0.30", "python-multipart", "psycopg[binary]>=3.1", "croniter"]
 
 [project.scripts]
@@ -29,7 +30,7 @@ darkcnn = "darkcnn.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-darkcnn = ["prompts/*.md", "web/static/*", "web/static/assets/*"]
+darkcnn = ["prompts/*.md", "web/static/*", "web/static/assets/*", "assets/fonts/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

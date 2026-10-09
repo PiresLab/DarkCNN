@@ -4,6 +4,7 @@ x-app: &app
   build: .
   env_file: .env
   environment:
+    TZ: ${TZ:-America/Sao_Paulo}  # fuso das agendas (cron)
     DATA_DIR: /data
     DATABASE_URL: postgresql://darkcnn:${POSTGRES_PASSWORD:-darkcnn}@db:5432/darkcnn
   volumes:
@@ -11,6 +12,7 @@ x-app: &app
   depends_on:
     db:
       condition: service_healthy
+  shm_size: 1gb  # o Chromium do login/assinatura do TikTok precisa de /dev/shm maior que o padrão
   restart: unless-stopped
 
 services:
@@ -41,6 +43,7 @@ services:
     <<: *app
     command: ["darkcnn", "worker"]
     environment:
+      TZ: ${TZ:-America/Sao_Paulo}
       DATA_DIR: /data
       DATABASE_URL: postgresql://darkcnn:${POSTGRES_PASSWORD:-darkcnn}@db:5432/darkcnn
       DARKCNN_WORKER_CONCURRENCY: "1"

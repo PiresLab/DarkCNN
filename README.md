@@ -106,11 +106,13 @@ python -m darkcnn web --no-worker     # só API: rode `python -m darkcnn worker`
 - **Criar vídeo:** assistente em passos (tipo, conteúdo, voz e fundo). "Gerar agora" ou "Salvar como automação".
 - **Automações:** presets que rodam sozinhos. A IA propõe o tema (sem repetir os anteriores) e, nos cortes e
   compilados, busca no YouTube (yt-dlp), filtra por duração e escolhe o vídeo-fonte. Só as gameplays são fixas.
-  Agenda por cron (ex.: todo dia às 18:00); se o servidor ficou desligado, a execução perdida roda uma vez.
-- **Meus vídeos:** prévia, aprovar/rejeitar, ajustar título e cortes, refazer e baixar.
-- **Gameplays:** upload pela interface (validado com ffprobe, com miniatura) para o volume.
+  Agenda livre: vários horários e dias da semana, ou um intervalo qualquer (ex.: a cada 90 minutos), com prévia das próximas
+  execuções. O fuso é o do servidor (`TZ`; no Docker, `America/Sao_Paulo` por padrão). Execução perdida roda uma vez.
+- **Meus vídeos:** prévia, ajustar título e cortes, refazer e baixar.
+- **Backgrounds:** upload pela interface (validado com ffprobe, com miniatura) para o volume.
 - **Execuções:** fila persistente, andamento por etapa, cancelamento e log técnico recolhido.
-- **Configurações:** chave do Gemini, voz (com prévia), aparência e limites. O resto fica em "Avançado".
+- **Configurações:** chave do Gemini, voz (com prévia), modelos (a lista vem da sua chave), marca d'água
+  (upload, posição, opacidade e tamanho), aparência e limites. O resto fica em "Avançado".
 
 Desenvolvimento da interface: `npm run dev` em `src/darkcnn/web/ui` (porta 5173, repassa `/api` para o 8765).
 
@@ -119,6 +121,37 @@ Variáveis: `DATA_DIR` (raiz dos dados; no Docker `/data`), `DATABASE_URL` (Post
 
 > Serve em `127.0.0.1` e **não tem senha**. Não exponha a porta na internet nem rode com `--host 0.0.0.0`
 > numa rede que você não controla.
+
+## Postar no TikTok
+
+Integração com o [autotok](https://github.com/makiisthenes/TiktokAutoUploader) (`pip install "darkcnn[tiktok]"`; já vem
+na imagem Docker). Tudo é feito pelo painel, sem instalar nada no computador de quem usa:
+
+1. **Configurações → TikTok → Conectar TikTok.** O servidor abre o login do TikTok num Chromium sem janela e mostra
+   a página no painel. Escaneie o **QR code** com o app (Perfil → QR code → Escanear). Se a página pedir outra coisa
+   (captcha, e-mail), clique e digite nela mesma. A sessão fica salva no volume (`/data/tiktok`, arquivo 0600) e vale
+   até o TikTok expirá-la: **Verificar** confere, e reconectar é só repetir.
+2. **Meus vídeos → Postar no TikTok:** conta, legenda (botão *Sugerir com IA*), público/privado, agora ou agendado
+   (15 min a 10 dias), rótulo "gerado por IA" e comentários/duetos/stitch. O envio entra na fila (Execuções) e o vídeo
+   ganha um selo *Postado*, *Agendado* ou *Falha*.
+3. **Automações → aba TikTok:** liga "postar ao terminar". Cada vídeo gerado vira uma postagem, com legenda e hashtags do
+   Gemini, escalonadas (intervalo configurável) para não postar tudo de uma vez.
+
+Como funciona por baixo: o autotok usa a API **web** do TikTok (não a oficial) e um Chromium para assinar cada upload.
+Por isso:
+- A conta **pode ser limitada ou banida** pelo TikTok. Use só contas suas, sem volume abusivo, e prefira um proxy por
+  conta (campo no login) se tiver várias.
+- Se o envio cair na hora de publicar, o painel avisa *"pode ou não ter sido postado"* e **não repete sozinho**: confira
+  a conta antes. Falhas antes de publicar são repetidas até 2 vezes, sem risco de duplicar.
+- Narrações usam voz sintética: o rótulo de IA vem ligado por padrão.
+- Fora do Docker o Chromium precisa existir: `python -m playwright install chromium` (ou `AUTOTOK_BROWSER_CHANNEL=chrome`
+  para usar o Chrome instalado). Navegador na nuvem (Browserbase/Steel): `AUTOTOK_BROWSER`, veja o README do autotok.
+- Plano B sem navegador: *Importar sessão manualmente* (cookies `sessionid` e `tt-target-idc`).
+
+> **Licença:** o autotok é **AGPL-3.0**. O DarkCNN o importa como biblioteca. Para uso pessoal isso não pede nada, mas
+> se você **distribuir o DarkCNN ou oferecê-lo como serviço a outras pessoas**, a AGPL exige publicar o código-fonte
+> completo (sob AGPL) para esses usuários, ou obter a licença comercial do autor do autotok. Sem o extra `tiktok`
+> instalado, nenhum código AGPL é carregado.
 
 ## Vídeos narrados sobre gameplay (`narrate`)
 Sem vídeo-fonte: a IA escreve o roteiro, uma voz narra e o texto aparece como legenda sobre uma gameplay
@@ -148,9 +181,10 @@ código casa o que ele ouviu com o texto **que sabemos que foi falado**. Assim a
 **Cache:** roteiro e voz ficam em `workspace\narrate\<id>\`. Mudar o texto de um bloco re-sintetiza **só ele**.
 Rodar o mesmo comando de novo não gasta nada.
 
-**Tic-tac da contagem:** no `voce-prefere`, enquanto os números 3, 2, 1 aparecem, toca um tic-tac de relógio
-(um tic e um tac por segundo). O som é gerado pelo código, sem arquivo de áudio de terceiros. `tick_volume` no
-`config.yaml` ajusta (0 desliga).
+**Tic-tac da contagem:** no `voce-prefere`, durante a contagem regressiva de 5 segundos toca um tic-tac de relógio
+(um tic e um tac por segundo, a 35% do volume). O som é gerado pelo código, sem arquivo de áudio de terceiros.
+Os números ficam entre as opções e a legenda; nenhuma legenda aparece durante a contagem. A fonte (DejaVu Sans)
+vem junto do projeto.
 
 **A abertura:** o prompt manda a 1ª frase falar com o espectador e fazer uma pergunta que ele não responde de cabeça,
 segurar a resposta por pelo menos duas linhas e entregar exatamente o que prometeu (sem isca vazia). O código confere a

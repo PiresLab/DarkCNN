@@ -34,8 +34,15 @@ def default_gameplays() -> Path | None:
     return _sub("gameplays") if data_root() else None
 
 
+BUNDLED_FONTS = Path(__file__).parent / "assets" / "fonts"
+
+
 def default_fonts() -> Path | None:
-    return _sub("fonts") if data_root() else None
+    """Fontes extras do usuário (volume Docker) se existirem; senão as empacotadas (DejaVu Sans)."""
+    user = _sub("fonts") if data_root() else None
+    if user is not None and user.is_dir() and any(user.iterdir()):
+        return user
+    return BUNDLED_FONTS if BUNDLED_FONTS.is_dir() else None
 
 
 def default_database_url(workspace: Path | None = None) -> str:
@@ -66,3 +73,8 @@ def apply_secrets() -> None:
         return
     if key:
         os.environ["GEMINI_API_KEY"] = key
+
+
+def tiktok_dir(workspace: Path) -> Path:
+    """Sessões do TikTok (cada arquivo equivale à senha da conta: fica no volume, com permissão 0600)."""
+    return (data_root() or Path(workspace).parent) / "tiktok"

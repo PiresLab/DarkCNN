@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from conftest import make_watermark, needs_ffmpeg
+
 
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
@@ -210,21 +212,21 @@ def test_reviews_list_cuts_and_narration(tmp_path):
     kinds = {r["kind"] for r in data}
     assert kinds == {"cuts", "narration"}
     cuts = [r for r in data if r["kind"] == "cuts"][0]
-    assert cuts["items"][0]["status"] == "pending" and cuts["has_review_md"] is True
+    assert "status" not in cuts["items"][0] and cuts["has_review_md"] is True
     narration = [r for r in data if r["kind"] == "narration"][0]
     assert narration["items"][0]["opening_warnings"]
 
 
-def test_patch_item_saves_status_and_recomputes_duration(tmp_path):
+def test_patch_item_saves_edits_and_recomputes_duration(tmp_path):
     c, _ = client_with(tmp_path)
     folder = selection(tmp_path / "out")
-    r = c.patch("/api/reviews/video-1/items/1", json={"status": "approved", "start": 12.0, "end": 30.0,
+    r = c.patch("/api/reviews/video-1/items/1", json={"start": 12.0, "end": 30.0,
                                                       "title": "Novo título"})
     assert r.status_code == 200 and r.json()["duration"] == 18.0
     saved = json.loads((folder / "selection.json").read_text(encoding="utf-8"))
-    assert saved[0]["status"] == "approved" and saved[0]["title"] == "Novo título"
+    assert "status" not in saved[0] and saved[0]["title"] == "Novo título"
     assert saved[1]["title"] == "Dois"  # os outros itens não foram tocados
-    assert c.patch("/api/reviews/video-1/items/9", json={"status": "approved"}).status_code == 404
+    assert c.patch("/api/reviews/video-1/items/9", json={"title": "x"}).status_code == 404
 
 
 def test_review_markdown_and_media_are_served_from_the_output_dir(tmp_path):
@@ -241,7 +243,7 @@ def test_paths_outside_the_output_dir_are_refused(tmp_path):
     selection(tmp_path / "out")
     (tmp_path / "segredo.txt").write_text("nada a ver")
     assert c.get("/api/media/..%2Fsegredo.txt").status_code in (400, 404)
-    assert c.patch("/api/reviews/..%2F..%2Fetc/items/1", json={"status": "approved"}).status_code in (400, 404)
+    assert c.patch("/api/reviews/..%2F..%2Fetc/items/1", json={"title": "x"}).status_code in (400, 404)
     with pytest.raises(ValueError):
         safe_under(tmp_path / "out", "../segredo.txt")
     assert safe_under(tmp_path / "out", "video-1/01_um.mp4").name == "01_um.mp4"
@@ -285,3 +287,68 @@ def test_unset_cli_flags_and_empty_fields_do_not_break_a_job(tmp_path):
                                                                    "gameplay_dir": ""}})
     assert r.status_code == 200, r.text
     assert wait_for(lambda: st.jobs.get(r.json()["id"])["status"] == "done")
+
+
+# ---------------------------------------------------------------- ajustes de configuração
+def test_models_endpoint_never_fails_without_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    c, _ = client_with(tmp_path)
+    r = c.get("/api/models")
+    assert r.status_code == 200 and r.json()["text"] == [] and r.json()["error"]
+
+
+def test_models_are_split_into_text_and_tts():
+    from darkcnn import models
+    got = models.classify([
+        ("models/gemini-3.1-flash-lite", ["generateContent"]),
+        ("models/gemini-2.5-flash-preview-tts", ["generateContent"]),
+        ("models/embedding-001", ["embedContent"]),
+        ("models/gemini-embedding", ["embedContent"]),
+        ("models/gemini-3-pro-image", ["generateContent"]),
+        ("models/gemini-2.5-computer-use-preview-10-2025", ["generateContent"]),
+        ("models/gemini-3.5-transcribe", ["generateContent"]),
+    ])
+    assert got == {"text": ["gemini-3.1-flash-lite"], "tts": ["gemini-2.5-flash-preview-tts"]}
+
+
+def test_models_use_cache_until_refresh(monkeypatch):
+    from darkcnn import models
+    monkeypatch.setenv("GEMINI_API_KEY", "k" * 30)
+    models._cache.update(at=0.0, key=None, data=None)
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return [("models/gemini-x", ["generateContent"])]
+
+    assert models.list_models(fetch=fetch)["text"] == ["gemini-x"]
+    models.list_models(fetch=fetch)
+    assert len(calls) == 1
+    models.list_models(refresh=True, fetch=fetch)
+    assert len(calls) == 2
+    models._cache.update(at=0.0, key=None, data=None)
+
+
+def test_schedule_preview(tmp_path):
+    c, _ = client_with(tmp_path)
+    ok = c.post("/api/schedule/preview", json={"cron": "*/90 * * * *", "count": 3})
+    assert ok.status_code == 200 and len(ok.json()["next"]) == 3
+    assert c.post("/api/schedule/preview", json={"cron": "nada"}).status_code == 400
+
+
+@needs_ffmpeg
+def test_watermark_upload_is_saved_in_config_and_removed(tmp_path):
+    src = make_watermark(tmp_path / "wm.png")
+    c, _ = client_with(tmp_path)
+    assert c.get("/api/watermark").json() == {"exists": False}
+    with src.open("rb") as f:
+        r = c.post("/api/watermark", files={"file": ("minha marca.png", f, "image/png")})
+    assert r.status_code == 200 and r.json()["width"] == 360
+    saved = yaml.safe_load((tmp_path / "config.yaml").read_text())["watermark"]
+    assert Path(saved["path"]).is_file() and c.get("/api/watermark/file").status_code == 200
+    assert c.put("/api/config", json={"values": {"watermark": {**saved, "opacity": 0.4, "width_pct": 20}}}).status_code == 200
+    assert c.post("/api/watermark", files={"file": ("x.txt", b"oi", "text/plain")}).status_code == 400
+    assert c.post("/api/watermark", files={"file": ("x.png", b"nao e imagem", "image/png")}).status_code == 400
+    c.delete("/api/watermark")
+    assert c.get("/api/watermark").json() == {"exists": False}
+    assert "path" not in yaml.safe_load((tmp_path / "config.yaml").read_text())["watermark"]

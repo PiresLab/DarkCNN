@@ -13,7 +13,7 @@ export interface Env {
   tokens_today: number; whisper_model: string;
 }
 export interface ReviewItem {
-  rank: number; status: string; title?: string; start?: number; end?: number; duration?: number;
+  rank: number; title?: string; start?: number; end?: number; duration?: number;
   hook_text?: string; context?: string; file?: string; voice?: string; score?: number;
   opening_warnings?: string[]; lines?: { text: string; kind: string }[];
 }
@@ -28,7 +28,25 @@ export interface PresetSpec {
   mode: Mode; narrate_format: string; count: number; target_s: number; niche: string | null;
   auto_topic: boolean; topic: string | null; theme: string | null; auto_source: boolean; source: string | null;
   profile: "talk" | "visual"; tts_voice: string | null; tts_voices_pool: string[]; tts_speed: number | null;
-  gameplay_ids: string[]; overrides: Record<string, unknown>;
+  gameplay_ids: string[]; overrides: Record<string, unknown>; tiktok: TikTokSpec | null;
+}
+export interface TikTokSpec {
+  enabled: boolean; account: string | null; visibility: "public" | "private"; ai_label: boolean; caption_ai: boolean;
+  delay_min: number; stagger_min: number; allow_comment: boolean; allow_duet: boolean; allow_stitch: boolean;
+}
+export const defaultTikTok = (): TikTokSpec => ({
+  enabled: false, account: null, visibility: "public", ai_label: true, caption_ai: true, delay_min: 0, stagger_min: 60,
+  allow_comment: true, allow_duet: false, allow_stitch: false,
+});
+export interface TikTokAccount { name: string; connected: boolean; proxy: string | null; updated_at?: string; error?: string }
+export interface TikTokStatus { available: boolean; browser_installed: boolean; accounts: TikTokAccount[] }
+export interface TikTokPost {
+  job_id: string; status: JobStatus; review_id: string | null; file: string | null; account: string | null;
+  video_id: string | null; scheduled_for: number | null; uncertain: boolean; error: string | null; created: number;
+}
+export interface LoginView {
+  id: string; name: string; status: "starting" | "waiting" | "connected" | "error" | "cancelled"; error: string | null;
+  image: string | null; viewport: { width: number; height: number };
 }
 export interface Schedule {
   id: string; preset_id: string; cron: string; enabled: boolean; last_run: number | null; next_run: number | null;
@@ -39,5 +57,5 @@ export interface ConfigResponse { saved: Record<string, unknown>; effective: Rec
 export const defaultSpec = (mode: Mode = "narrate"): PresetSpec => ({
   mode, narrate_format: "curiosidade", count: 1, target_s: 45, niche: null, auto_topic: true, topic: null,
   theme: null, auto_source: true, source: null, profile: "talk", tts_voice: null, tts_voices_pool: [],
-  tts_speed: null, gameplay_ids: [], overrides: {},
+  tts_speed: null, gameplay_ids: [], overrides: {}, tiktok: null,
 });

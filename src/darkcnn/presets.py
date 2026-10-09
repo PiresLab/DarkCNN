@@ -14,6 +14,28 @@ from .config import Config
 from .db import Database, Preset, Schedule
 
 
+class TikTokSpec(BaseModel):
+    """Postar no TikTok ao terminar de gerar."""
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    account: str | None = None
+    visibility: Literal["public", "private"] = "public"
+    ai_label: bool = True  # rotula como "gerado por IA" (voz sintética)
+    caption_ai: bool = True  # legenda e hashtags escritas pelo Gemini; senão, só o título
+    delay_min: int = Field(0, ge=0, le=14400)  # espera antes do 1º post (0 = na hora; mínimo prático 15)
+    stagger_min: int = Field(60, ge=15, le=1440)  # intervalo entre os vídeos de uma mesma execução
+    allow_comment: bool = True
+    allow_duet: bool = False
+    allow_stitch: bool = False
+
+    @model_validator(mode="after")
+    def _check(self) -> "TikTokSpec":
+        if self.enabled and not self.account:
+            raise ValueError("escolha a conta do TikTok em que a automação vai postar")
+        return self
+
+
 class PresetSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -37,6 +59,7 @@ class PresetSpec(BaseModel):
     gameplay_ids: list[str] = []  # vazio = qualquer gameplay da biblioteca
     # --- qualquer outro campo da Config (avançado), validado na hora de rodar ---
     overrides: dict[str, Any] = {}
+    tiktok: TikTokSpec | None = None
 
     @model_validator(mode="after")
     def _check(self) -> "PresetSpec":
