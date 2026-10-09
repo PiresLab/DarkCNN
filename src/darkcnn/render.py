@@ -24,6 +24,12 @@ def video_chain(layout: str) -> str:
     )
 
 
+def wm_chain(inp: str, w) -> str:
+    """Prepara a marca d'água: tamanho (% da largura do vídeo, se pedido) e opacidade."""
+    scale = f"scale={round(1080 * w.width_pct / 100)}:-1," if w.width_pct else ""
+    return f"[{inp}]{scale}format=rgba,colorchannelmixer=aa={w.opacity:.2f}[wm]"
+
+
 def build_filter(cfg: Config, has_ass: bool, has_fonts: bool, has_wm: bool) -> tuple[str, str]:
     """(filter_complex, rótulo final). Nomes relativos: o ffmpeg roda com cwd=workdir, o que evita o
     escape de 'C:\\...' dentro do filtro no Windows."""
@@ -35,7 +41,7 @@ def build_filter(cfg: Config, has_ass: bool, has_fonts: bool, has_wm: bool) -> t
         last = "v1"
     if has_wm:
         w = cfg.watermark
-        parts.append(f"[1:v]format=rgba,colorchannelmixer=aa={w.opacity:.2f}[wm]")
+        parts.append(wm_chain("1:v", w))
         parts.append(f"[{last}][wm]overlay={w.x}:{w.y}[v]")
         last = "v"
     return ";".join(parts), last
@@ -141,7 +147,7 @@ def render_narration(gameplay: Path, offset: float, loop: bool, voice_wav: Path,
         last = "v1"
         if has_wm:
             w = cfg.watermark
-            parts.append(f"[2:v]format=rgba,colorchannelmixer=aa={w.opacity:.2f}[wm]")
+            parts.append(wm_chain("2:v", w))
             parts.append(f"[{last}][wm]overlay={w.x}:{w.y}[v]")
             last = "v"
         if mix:  # normalize=0: sem isso o amix derruba o volume da voz pela metade

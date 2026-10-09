@@ -38,7 +38,7 @@ export default function Dashboard() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Em andamento" value={running.length} sub={running.length ? "gerando agora" : "nada na fila"} />
         <Stat label="Vídeos prontos" value={(reviews.data ?? []).reduce((n, r) => n + r.items.filter((i) => i.file).length, 0)} />
-        <Stat label="Gameplays" value={env.data?.gameplays ?? "—"} />
+        <Stat label="Backgrounds" value={env.data?.gameplays ?? "—"} />
         <div className="card p-4">
           <div className="text-sm text-muted">Uso da IA hoje</div>
           <div className="mt-1 text-2xl font-bold">{env.data ? `${env.data.requests_today}/${env.data.daily_budget}` : "—"}</div>

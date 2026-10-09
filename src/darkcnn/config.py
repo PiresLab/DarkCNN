@@ -19,6 +19,7 @@ class WatermarkCfg(BaseModel):
     # expressões do filtro overlay do FFmpeg (W/H = vídeo, w/h = marca d'água)
     x: str = "W-w-48"
     y: str = "120"  # acima do título (layout 'titled'), fora da zona de UI das plataformas
+    width_pct: float | None = Field(None, gt=0, le=100)  # largura em % do vídeo; None = tamanho original
 
 
 class Config(BaseModel):
@@ -64,8 +65,8 @@ class Config(BaseModel):
     gameplay_files: list[Path] | None = None  # subconjunto escolhido (presets); None = a pasta toda
     game_volume: float = Field(0.06, ge=0.0, le=1.0)  # volume do áudio da gameplay (0 = mudo)
     pause_s: float = Field(0.35, ge=0.0)  # silêncio entre as linhas do roteiro
-    countdown_s: float = Field(3.0, ge=0.0)  # tempo de decisão após uma pergunta "você prefere"
-    tick_volume: float = Field(0.5, ge=0.0, le=1.0)  # tic-tac de relógio durante a contagem (0 desliga)
+    countdown_s: float = Field(5.0, ge=0.0)  # tempo de decisão após uma pergunta "você prefere"
+    tick_volume: float = Field(0.35, ge=0.0, le=1.0)  # tic-tac de relógio durante a contagem (0 desliga)
     seed: int | None = None  # fixa a escolha da gameplay (reprodutível)
     theme_min_fit: int = Field(5, ge=1, le=10)  # abaixo disso o momento não combina com o tema e é descartado
 
@@ -100,7 +101,7 @@ class Config(BaseModel):
     # | ranked = compilado "Top N" | none. Padrão (se não escolhido): both no perfil talk, titled no visual.
     text_mode: Literal["captions", "titled", "both", "ranked", "none"] = "captions"
     layout: Literal["crop", "blur"] = "blur"
-    font: str = "Arial" if os.name == "nt" else "DejaVu Sans"
+    font: str = "DejaVu Sans"  # a fonte vem empacotada (assets/fonts), igual em qualquer sistema
     fonts_dir: Path | None = Field(default_factory=storage.default_fonts)
     preset: str = "medium"
     crf: int = 20

@@ -24,7 +24,7 @@ Style: Rank,{font},300,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,
 Style: OptA,{font},70,{white},{white},&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,7,2,2,90,90,0,1
 Style: OptB,{font},70,{white},{white},&H00000000,&H96000000,-1,0,0,0,100,100,0,0,1,7,2,8,90,90,0,1
 Style: VS,{font},50,{yellow},{yellow},&H00000000,&H00000000,-1,0,0,0,100,100,4,0,1,5,2,5,60,60,0,1
-Style: Timer,{font},220,{yellow},{yellow},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,3,5,60,60,0,1
+Style: Timer,{font},180,{yellow},{yellow},&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,3,5,60,60,0,1
 Style: Badge,{font},84,{yellow},{yellow},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,7,50,50,95,1
 
 [Events]
@@ -48,7 +48,7 @@ def group_words(words: list[dict], max_words: int = 3, max_chars: int = 16) -> l
     cur: list[dict] = []
     for w in words:
         size = sum(len(x["w"]) for x in cur) + len(cur) + len(w["w"])
-        if cur and (len(cur) >= max_words or size > max_chars):
+        if cur and (w.get("brk") or len(cur) >= max_words or size > max_chars):
             groups.append(cur)
             cur = []
         cur.append(w)
@@ -111,7 +111,7 @@ def build_ass(clip: dict, words: list[dict], cfg: Config) -> str | None:
 # um pouco abaixo. A A cresce para cima e a B para baixo, então rótulo de duas linhas não invade o vizinho.
 CENTER_X, CENTER_Y = 540, 960
 OPT_GAP = 46  # distância do centro até a borda de cada opção
-TIMER_Y = 1330  # a contagem fica logo abaixo do bloco (não há fala durante ela, então não disputa com a legenda)
+TIMER_Y = 1170  # entre o bloco das opções (termina ~1050) e a legenda (começa ~1300): nunca encosta em nenhuma
 
 
 def choice_events(choices: list[dict]) -> list[str]:
@@ -134,8 +134,31 @@ def choice_events(choices: list[dict]) -> list[str]:
     return out
 
 
+def _clear_countdown(words: list[dict], choices: list[dict]) -> list[dict]:
+    """Nenhuma palavra da legenda vive durante a contagem: corta o que invade a janela e descarta o que nasce nela."""
+    out = []
+    for w in words:
+        keep = True
+        for c in choices:
+            lo, hi = c["end"], c["end"] + c["countdown"]
+            if lo <= w["start"] < hi:
+                keep = False
+                break
+            if w["start"] < lo < w["end"]:
+                w = {**w, "end": lo}
+        if keep:
+            out.append(w)
+    # a 1ª palavra depois de cada contagem abre um grupo novo: senão a anterior ficaria na tela até ela
+    for c in choices:
+        hi = c["end"] + c["countdown"]
+        for i, w in enumerate(out):
+            if w["start"] >= hi and (i == 0 or out[i - 1]["start"] < c["end"]):
+                out[i] = {**w, "brk": True}
+    return out
+
+
 def build_narration_ass(words: list[dict], choices: list[dict], total_s: float, cfg: Config) -> str:
     """Legenda por palavra da narração inteira + o visual das escolhas."""
     head = _HEADER.format(font=cfg.font, white=WHITE, yellow=HIGHLIGHT)
-    events = [] if cfg.text_mode == "none" else _caption_events(words, 0.0, total_s)
+    events = [] if cfg.text_mode == "none" else _caption_events(_clear_countdown(words, choices), 0.0, total_s)
     return head + "".join(events + choice_events(choices))

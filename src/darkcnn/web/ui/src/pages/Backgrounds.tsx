@@ -22,7 +22,7 @@ function upload(file: File, onProgress: (pct: number) => void): Promise<void> {
   });
 }
 
-export default function Gameplays() {
+export default function Backgrounds() {
   const games = useGameplays();
   const qc = useQueryClient();
   const toast = useToast();
@@ -47,12 +47,12 @@ export default function Gameplays() {
   };
   const remove = useMutation({
     mutationFn: (id: string) => fetch(`/api/gameplays/${id}`, { method: "DELETE" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["gameplays"] }); toast("Gameplay removida"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["gameplays"] }); toast("Background removido"); },
   });
 
   return (
     <>
-      <PageHeader title="Gameplays" subtitle="Vídeos de fundo usados nas narrações. Eles ficam guardados no servidor." />
+      <PageHeader title="Backgrounds" subtitle="Vídeos de fundo usados nas narrações. Ficam guardados no servidor." />
 
       <div onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
         onDrop={(e) => { e.preventDefault(); setDrag(false); send(e.dataTransfer.files); }}
@@ -60,7 +60,7 @@ export default function Gameplays() {
         onClick={() => input.current?.click()} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && input.current?.click()}>
         <UploadCloud className="h-8 w-8 text-brand" />
         <div className="font-semibold">Arraste vídeos aqui ou clique para escolher</div>
-        <div className="text-sm text-muted">MP4, MKV, MOV, WEBM ou AVI. Use gameplays livres de direitos ou que você tenha autorização para usar.</div>
+        <div className="text-sm text-muted">MP4, MKV, MOV, WEBM ou AVI. Use vídeos livres de direitos ou que você tenha autorização para usar.</div>
         <input ref={input} type="file" accept="video/*" multiple hidden onChange={(e) => e.target.files && send(e.target.files)} />
       </div>
       {sending && (
@@ -72,7 +72,7 @@ export default function Gameplays() {
 
       <div className="mt-6">
         {games.isLoading ? <Skeleton className="h-40" /> : (games.data ?? []).length === 0 ? (
-          <Empty icon={<Gamepad2 className="h-8 w-8" />} title="Biblioteca vazia">Envie ao menos uma gameplay para criar narrações.</Empty>
+          <Empty icon={<Gamepad2 className="h-8 w-8" />} title="Nenhum background ainda">Envie ao menos um vídeo de fundo para criar narrações.</Empty>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {games.data!.map((g) => (
