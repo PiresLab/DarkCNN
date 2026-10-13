@@ -70,6 +70,33 @@ def test_config_roundtrip_and_unknown_key_is_rejected(tmp_path):
     assert yaml.safe_load((tmp_path / "config.yaml").read_text())["clips_per_video"] == 3
 
 
+def test_old_compile_duration_keys_do_not_break_and_are_dropped_on_save(tmp_path):
+    c, _ = client_with(tmp_path)
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"compile_max_clip_s": 20, "crf": 18}))
+    assert c.get("/api/config").status_code == 200
+    assert c.put("/api/config", json={"values": {"compile_pre_s": 2.5}}).json()["effective"]["compile_pre_s"] == 2.5
+    assert "compile_max_clip_s" not in yaml.safe_load((tmp_path / "config.yaml").read_text())
+
+
+def test_text_layout_is_saved_and_validated(tmp_path):
+    c, _ = client_with(tmp_path)
+    spec = c.get("/api/layout").json()
+    assert set(spec["kinds"]) == {"cuts", "compile", "narrate"} and spec["layers"]["compile"]["clipe"]["anchor"] == "bottom"
+    ok = c.put("/api/config", json={"values": {"text_layout": {"compile": {"clipe": {"y": 1300, "size": 90}}}}})
+    assert ok.status_code == 200 and ok.json()["effective"]["text_layout"]["compile"]["clipe"] == {"y": 1300, "size": 90}
+    bad = c.put("/api/config", json={"values": {"text_layout": {"compile": {"rodape": {"y": 1, "size": 40}}}}})
+    assert bad.status_code == 400 and "rodape" in bad.text
+
+
+@needs_ffmpeg
+def test_layout_preview_renders_a_png(tmp_path):
+    c, _ = client_with(tmp_path)
+    r = c.post("/api/layout/preview", json={"kind": "compile", "text_layout": {"compile": {"clipe": {"y": 1200, "size": 90}}}})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content[:4] == b"\x89PNG"
+    assert c.post("/api/layout/preview", json={"kind": "outro"}).status_code == 400
+    assert c.post("/api/layout/preview", json={"kind": "cuts", "text_layout": {"cuts": {"x": {}}}}).status_code == 400
+
+
 def test_config_is_read_fresh_on_every_request(tmp_path):
     c, _ = client_with(tmp_path)
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(

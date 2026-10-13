@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from . import cache, textlayers
+from . import layout as layoutlib
 from .config import Config
 from .media import MediaError, has_audio, run
 
@@ -54,11 +55,13 @@ def render_key(src_id: str, clip: dict, words: list[dict], cfg: Config) -> str:
         wm_sig = [str(wm), wm.stat().st_size, int(wm.stat().st_mtime)]
     inside = [w for w in words if clip["start"] - 0.05 <= w["start"] and w["end"] <= clip["end"] + 0.05]
     return cache.key_of(
-        v=2, src=src_id, start=clip["start"], end=clip["end"], title=clip["title"], hook=clip["hook_text"],
+        v=3, src=src_id, start=clip["start"], end=clip["end"], title=clip["title"], hook=clip["hook_text"],
         text_mode=cfg.text_mode, layout=cfg.layout, font=cfg.font, preset=cfg.preset, crf=cfg.crf,
         wm=wm_sig, wm_cfg=cfg.watermark.model_dump(mode="json", exclude={"path"}),
         words=inside if cfg.text_mode in ("captions", "both") else None,
         context=clip.get("context"), rank_pos=clip.get("rank_pos"), theme=clip.get("theme"),
+        total=clip.get("total"),
+        text_layout=layoutlib.resolve(cfg.text_layout, "compile" if cfg.text_mode == "ranked" else "cuts"),
     )
 
 
@@ -115,7 +118,23 @@ def narration_key(gameplay: Path, offset: float, loop: bool, words: list[dict], 
         words=words, choices=choices, text_mode=cfg.text_mode, layout=cfg.layout, font=cfg.font,
         preset=cfg.preset, crf=cfg.crf, game_volume=cfg.game_volume, tick=cfg.tick_volume, wm=wm_sig,
         wm_cfg=cfg.watermark.model_dump(mode="json", exclude={"path"}),
+        text_layout=layoutlib.resolve(cfg.text_layout, "narrate"),
     )
+
+
+def render_layout_preview(cfg: Config, kind: str, variant: str | None, workdir: Path) -> Path:
+    """Um quadro PNG 1080x1920 com o texto de exemplo do tipo, queimado pelo mesmo filtro `ass` dos vídeos."""
+    shutil.rmtree(workdir, ignore_errors=True)
+    workdir.mkdir(parents=True, exist_ok=True)
+    (workdir / "subs.ass").write_text(textlayers.preview_ass(cfg, kind, variant), encoding="utf-8")
+    has_fonts = bool(cfg.fonts_dir and Path(cfg.fonts_dir).is_dir())
+    if has_fonts:
+        shutil.copytree(cfg.fonts_dir, workdir / "fonts")
+    run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+         "-f", "lavfi", "-i", "color=c=0x3a4048:s=1080x1920:r=10:d=2",
+         "-vf", "ass=subs.ass" + (":fontsdir=fonts" if has_fonts else ""),
+         "-ss", "1", "-frames:v", "1", "preview.png"], cwd=workdir)
+    return workdir / "preview.png"
 
 
 def render_narration(gameplay: Path, offset: float, loop: bool, voice_wav: Path, words: list[dict],

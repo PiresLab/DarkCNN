@@ -1,3 +1,5 @@
+import pytest
+
 from darkcnn import textlayers as T
 from darkcnn.config import Config
 
@@ -60,15 +62,51 @@ def test_both_falls_back_to_title_without_context():
     assert "Título só" in ass
 
 
-def test_ranked_has_theme_title_big_rank_badge_and_hook():
-    clip = {**CLIP, "rank_pos": 3, "theme": "top 5 finalizações", "title": "Mata-leão no 2º round"}
+def test_ranked_has_video_intro_on_top_clip_caption_below_big_rank_and_badge():
+    clip = {**CLIP, "rank_pos": 3, "theme": "top 5 finalizações", "title": "Mata-leão no 2º round", "total": 5}
     ass = T.build_ass(clip, [], Config(text_mode="ranked"))
     d = [l for l in ass.splitlines() if l.startswith("Dialogue")]
     styles = [l.split(",")[3] for l in d]
-    assert styles == ["Theme", "Title", "Rank", "Badge", "Hook"]
-    assert "TOP 5 FINALIZAÇÕES" in d[0] and "Mata-leão" in d[1]
-    assert d[2].startswith("Dialogue: 2,0:00:00.00,0:00:01.40") and "#3" in d[2]  # número grande só na entrada
-    assert d[3].startswith("Dialogue: 1,0:00:00.00,0:00:10.00") and d[3].endswith("#3")  # selo fixo
+    assert styles == ["About", "Rank", "Badge", "Clip"]
+    assert "TOP 5 FINALIZAÇÕES" in d[0] and "OS 5 MELHORES MOMENTOS" in d[0] and "DO #5 AO #1" in d[0]
+    assert "\\N" in d[0] and "Mata-leão" in d[3] and "\\N" in d[3]  # título do clipe + gancho, juntos embaixo
+    assert d[1].startswith("Dialogue: 2,0:00:00.00,0:00:01.40") and "#3" in d[1]  # número grande só na entrada
+    assert d[2].startswith("Dialogue: 1,0:00:00.00,0:00:10.00") and d[2].endswith("#3")  # selo fixo
+    # introdução no topo (alinhamento 8), legenda do clipe embaixo (alinhamento 2) acima da área de interface
+    st = {l.split(",")[0].removeprefix("Style: "): l.split(",") for l in ass.splitlines() if l.startswith("Style:")}
+    assert st["About"][18] == "8" and st["Clip"][18] == "2" and int(st["Clip"][21]) >= 350
+
+
+def style(ass: str, name: str) -> list[str]:
+    return next(l for l in ass.splitlines() if l.startswith(f"Style: {name},")).split(",")
+
+
+def test_default_layout_keeps_the_previous_positions():
+    ass = T.build_ass(CLIP, WORDS, Config(text_mode="titled"))
+    assert style(ass, "Title")[2] == "66" and style(ass, "Title")[21] == "300"  # topo: MarginV = y
+    assert style(ass, "Hook")[2] == "86" and style(ass, "Hook")[21] == "330"  # base: MarginV = 1920 - y
+    assert style(ass, "Default")[21] == "520"
+
+
+def test_text_layout_moves_and_resizes_each_layer_per_video_type():
+    cfg = Config(text_mode="ranked", text_layout={"compile": {"clipe": {"y": 1300, "size": 100},
+                                                              "numero": {"y": 800, "size": 250}}})
+    clip = {**CLIP, "rank_pos": 2, "theme": "top 5", "total": 5}
+    ass = T.build_ass(clip, [], cfg)
+    assert style(ass, "Clip")[2] == "100" and style(ass, "Clip")[21] == "620"  # 1920 - 1300
+    assert style(ass, "Rank")[2] == "250" and "\\pos(540,800)" in ass
+    assert "\\fs100\\c" in ass and "\\fs72\\c" in ass  # gancho e título (72%) seguem o tamanho da camada
+    # outro tipo de vídeo não é afetado
+    assert style(T.build_ass(CLIP, WORDS, Config(text_mode="titled", text_layout=cfg.text_layout)), "Hook")[21] == "330"
+    nar = T.build_narration_ass([], CHOICES, 12, Config(text_layout={"narrate": {"contagem": {"y": 1250, "size": 150}}}))
+    assert "\\pos(540,1250)" in nar and style(nar, "Timer")[2] == "150"
+
+
+def test_unknown_layout_layer_is_an_error():
+    with pytest.raises(ValueError, match="camada desconhecida 'rodape'"):
+        Config(text_layout={"compile": {"rodape": {"y": 10, "size": 40}}})
+    with pytest.raises(ValueError, match="tipo desconhecido"):
+        Config(text_layout={"live": {}})
 
 
 CHOICES = [{"a": "Nunca sentir dor", "b": "Nunca sentir medo", "start": 2.0, "end": 6.0, "countdown": 3.0}]

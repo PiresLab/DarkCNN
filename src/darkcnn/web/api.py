@@ -15,7 +15,7 @@ from pydantic import BaseModel, ValidationError
 
 from .. import media
 from .. import storage
-from ..config import Config, load_config
+from ..config import LEGACY_KEYS, Config, load_config
 from ..db import Database
 from ..review import unique_videos
 from .jobs import JobManager
@@ -75,7 +75,7 @@ class AppState:
 
     def save(self, values: dict) -> Config:
         merged = {**self.saved(), **values}
-        merged = {k: v for k, v in merged.items() if v is not None}
+        merged = {k: v for k, v in merged.items() if v is not None and k not in LEGACY_KEYS}
         cfg = Config(**merged)  # extra="forbid": chave desconhecida é recusada aqui
         self.config_path.write_text(yaml.safe_dump(merged, allow_unicode=True, sort_keys=False),
                                     encoding="utf-8")

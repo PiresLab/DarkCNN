@@ -22,8 +22,26 @@ class WatermarkCfg(BaseModel):
     width_pct: float | None = Field(None, gt=0, le=100)  # largura em % do vídeo; None = tamanho original
 
 
+class TextBox(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    y: int = Field(ge=0, le=1920)  # pixels do vídeo 1080x1920; o significado depende da âncora (layout.py)
+    size: int = Field(ge=16, le=400)  # tamanho da fonte
+
+
+# campos que existiram e saíram: ignorados ao carregar, para configs antigos não quebrarem
+LEGACY_KEYS = {"compile_min_clip_s", "compile_max_clip_s"}
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy(cls, data: Any) -> Any:
+        if isinstance(data, dict) and LEGACY_KEYS & data.keys():
+            data = {k: v for k, v in data.items() if k not in LEGACY_KEYS}
+        return data
 
     # --- Gemini ---
     gemini_model: str = "gemini-3.1-flash-lite"  # NUNCA fixar no código: IDs mudam/são descontinuados
@@ -83,10 +101,11 @@ class Config(BaseModel):
     min_clip_s: float = Field(30.0, gt=0)
     max_clip_s: float = Field(60.0, gt=0)
     clips_per_video: int = Field(5, ge=1)
-    # compilado "Top N": um único vídeo com poucos momentos curtos (independente dos cortes acima)
+    # compilado "Top N": um único vídeo com poucos momentos curtos (independente dos cortes acima).
+    # Cada clipe vai de `compile_pre_s` antes do clímax (que a IA marca) até `compile_post_s` depois dele.
     compile_clips: int = Field(5, ge=1, le=12)
-    compile_min_clip_s: float = Field(6.0, gt=0)
-    compile_max_clip_s: float = Field(12.0, gt=0)
+    compile_pre_s: float = Field(4.0, ge=0.5, le=30)
+    compile_post_s: float = Field(3.0, ge=0.5, le=30)
     pad_start_s: float = 0.15
     pad_end_s: float = 0.30
     max_single_window_min: float = 40.0  # acima disso avisa (chunking só na Fase 3)
@@ -109,6 +128,9 @@ class Config(BaseModel):
     preset: str = "medium"
     crf: int = 20
     watermark: WatermarkCfg = WatermarkCfg()
+    # posição/tamanho dos textos por tipo de vídeo ("cuts" | "compile" | "narrate") -> camada -> {y, size};
+    # o que não estiver aqui usa o padrão de layout.py
+    text_layout: dict[str, dict[str, TextBox]] = {}
 
     # --- TikTok ---
     # hashtags de alcance: 3 delas (sorteadas) entram em cada legenda gerada pela IA, antes das 3 do assunto. A IA não vê
@@ -127,6 +149,8 @@ class Config(BaseModel):
     def _check(self) -> "Config":
         if self.max_clip_s < self.min_clip_s:
             raise ValueError("max_clip_s deve ser >= min_clip_s")
+        from .layout import check
+        check(self.text_layout)
         return self
 
 

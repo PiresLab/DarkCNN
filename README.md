@@ -82,8 +82,10 @@ Para transformar **um** vídeo-fonte (ex.: uma compilação de lutas) em **um** 
 python -m darkcnn compile "https://youtu.be/XXXX" --theme "top 5 finalizações"
 ```
 Sai `output\<video>\compilado_top-5-finalizacoes.mp4` (1080x1920) com os momentos em **contagem regressiva** (#5 → #1: o melhor
-por último). Cada trecho mostra o tema fixo e o título no topo, um selo `#N` no canto, o número grande na entrada e a
-frase-gancho embaixo. Padrões: 5 momentos de 8 a 25 s (`--clips`, `--min`, `--max`).
+por último). No topo fica a apresentação do vídeo (tema + "os N melhores momentos"), embaixo o título e a frase-gancho
+do clipe, um selo `#N` no canto e o número grande na entrada. O Gemini marca o instante do clímax de cada lance e o clipe
+vai de alguns segundos antes a alguns depois dele. Padrões: 5 momentos, 4 s antes e 3 s depois do clímax (`--clips`,
+`--before`, `--after`). A posição e o tamanho dos textos de cada tipo de vídeo se ajustam em Configurações > Posição dos textos.
 
 Como funciona: o Gemini procura só os momentos que **são exemplos fortes do tema** (dá uma nota de encaixe e descarta
 os que não combinam), depois o **juiz** assiste a todos e os ranqueia comparando, e o código monta o vídeo. Se houver

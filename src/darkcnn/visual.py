@@ -33,6 +33,7 @@ class VisualSelection(BaseModel):
 
 class ThemeCandidate(VisualCandidate):
     fit: int = Field(ge=1, le=10)  # o quanto é um exemplo forte do tema do compilado
+    climax_ts: str  # MM:SS (relativo ao vídeo da janela) do ápice do lance: o clipe é montado em volta dele
 
 
 class ThemeSelection(BaseModel):
@@ -74,7 +75,7 @@ def build_theme_prompt(win: list[Shot], cfg: Config, theme: str | None = None) -
     dur = win[-1]["end"] - win[0]["start"]
     return tpl.format(window_len=f"{dur / 60:.0f} min" if dur >= 90 else f"{dur:.0f} s", theme=theme or cfg.theme,
                       shots=shots_table(win), n_candidates=n_candidates(cfg),
-                      min_s=int(cfg.min_clip_s), max_s=int(cfg.max_clip_s))
+                      pre_s=f"{cfg.compile_pre_s:g}", post_s=f"{cfg.compile_post_s:g}")
 
 
 # ---------------------------------------------------------------- proxy
@@ -150,6 +151,56 @@ def reconcile(c: dict[str, Any], shots: list[Shot], window_start: float,
     return c, fixed
 
 
+# ---------------------------------------------------------------- clímax (compilado)
+def climax_time(c: dict[str, Any], shots: list[Shot], win: list[Shot]) -> float:
+    """Instante absoluto do clímax. Sem `climax_ts` válido (ou fora da janela), usa o meio do lance."""
+    t = parse_mmss(c.get("climax_ts") or "")
+    if t is not None:
+        t += win[0]["start"]
+        if win[0]["start"] <= t <= win[-1]["end"]:
+            return round(t, 3)
+    by_id = {s["id"]: s for s in shots}
+    a, b = by_id.get(c["start_id"]), by_id.get(c["end_id"])
+    if a is None or b is None:
+        return round((win[0]["start"] + win[-1]["end"]) / 2, 3)
+    return round((a["start"] + b["end"]) / 2, 3)
+
+
+def resolve_climax(candidates: list[dict[str, Any]], cfg: Config, total: float) -> tuple[list[dict], list[dict]]:
+    """Clímax -> tempos: `compile_pre_s` antes e `compile_post_s` depois (dentro do vídeo).
+    Devolve (aceitos pela nota, até `clips_per_video`; rejeitados com motivo). Clipes não se sobrepõem."""
+    from .analyze import _clip
+
+    ok: list[dict] = []
+    rejected: list[dict] = []
+    for c in candidates:
+        peak = c.get("climax")
+        if peak is None:
+            rejected.append({**c, "reason_rejected": "sem instante de clímax"})
+            continue
+        start = max(0.0, peak - cfg.compile_pre_s)
+        end = min(total, peak + cfg.compile_post_s)
+        if end - start < 1.0:
+            rejected.append({**c, "reason_rejected": "clímax fora do vídeo"})
+            continue
+        ok.append({**c, "title": _clip(c["title"], 60), "hook_text": _clip(c["hook_text"], 40),
+                   "start": round(start, 3), "end": round(end, 3), "duration": round(end - start, 3),
+                   "adjusted": False})
+    ok.sort(key=lambda c: (-c["score"], -c["hook"], c["start"]))
+    accepted: list[dict] = []
+    for c in ok:
+        clash = next((a for a in accepted if c["start"] < a["end"] and a["start"] < c["end"]), None)
+        if clash is not None:
+            rejected.append({**c, "reason_rejected": f"sobreposto ao clipe de {fmt_ts(clash['start'])}"})
+        elif len(accepted) >= cfg.clips_per_video:
+            rejected.append({**c, "reason_rejected": "acima da quantidade pedida"})
+        else:
+            accepted.append(c)
+    for rank, c in enumerate(accepted, 1):
+        c["rank"] = rank
+    return accepted, rejected
+
+
 # ---------------------------------------------------------------- seleção por janela
 def select_visual(video: Path, vid: str, ws: Path, shots: list[Shot], cfg: Config,
                   client_factory: Callable[[], GeminiClient], force: bool = False,
@@ -171,7 +222,7 @@ def select_visual(video: Path, vid: str, ws: Path, shots: list[Shot], cfg: Confi
 
     for i, win in enumerate(windows):
         path = ws / "analysis" / f"{prefix}_{i:02d}.json"
-        key = cache.key_of(v=1, vid=vid, win=i, table=shots_table(win), model=cfg.gemini_model,
+        key = cache.key_of(v=2 if theme else 1, vid=vid, win=i, table=shots_table(win), model=cfg.gemini_model,
                            prompt=tag, n=n_candidates(cfg), min=cfg.min_clip_s,
                            max=cfg.max_clip_s, fps=cfg.visual_fps, h=cfg.proxy_height, thinking=cfg.thinking_level)
         cands = None if force else cache.load(path, key)
@@ -192,6 +243,8 @@ def select_visual(video: Path, vid: str, ws: Path, shots: list[Shot], cfg: Confi
         for c in cands:
             c2, n = reconcile(c, shots, win[0]["start"])
             stats["reconciled"] += n
+            if theme:
+                c2["climax"] = climax_time(c2, shots, win)
             out.append(c2)
     if stats["reconciled"]:
         log.warning("%d ID(s) de plano corrigido(s) pelo tempo informado: o Gemini errou a leitura do número",

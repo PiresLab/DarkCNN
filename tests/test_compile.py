@@ -11,10 +11,11 @@ from darkcnn.media import video_info
 from darkcnn.shots import has_audio
 
 
-def tc(start_id, end_id, start_ts, end_ts, fit, score=8, title="Momento"):
+def tc(start_id, end_id, start_ts, end_ts, fit, score=8, title="Momento", climax_ts=""):
+    """Sem `climax_ts` o clímax cai no meio do lance (planos start_id..end_id)."""
     return V.ThemeCandidate(start_id=start_id, end_id=end_id, start_ts=start_ts, end_ts=end_ts, title=title,
                             hook_text="olha isso", reason="r", hook=7, standalone=7, emotion=8, payoff=8,
-                            score=score, fit=fit)
+                            score=score, fit=fit, climax_ts=climax_ts)
 
 
 def factory(backend, cfg):
@@ -29,15 +30,35 @@ def test_prepare_theme_drops_weak_fits_and_weights_fit():
     assert cands[0]["score"] == 6  # não altera a entrada
 
 
-def test_compile_defaults_use_compile_fields_not_the_cuts_ones():
+def test_compile_defaults_use_compile_fields_and_always_ranked_text():
     c = pipeline.compile_defaults(Config(theme="top 5"))
-    assert (c.profile, c.text_mode, c.clips_per_video, c.min_clip_s, c.max_clip_s) == ("visual", "ranked", 5, 6, 12)
-    # min/max/clips dos cortes (Configurações) não vazam para o compilado
-    leak = pipeline.compile_defaults(Config(theme="top 5", min_clip_s=30, max_clip_s=60, clips_per_video=9, text_mode="none"))
-    assert (leak.clips_per_video, leak.min_clip_s, leak.max_clip_s, leak.text_mode) == (5, 6, 12, "none")
-    e = pipeline.compile_defaults(Config(theme="top 5", compile_clips=3, compile_min_clip_s=8, compile_max_clip_s=20))
-    assert (e.clips_per_video, e.min_clip_s, e.max_clip_s) == (3, 8, 20)
-    assert pipeline.compile_defaults(Config(theme="x", compile_min_clip_s=30)).max_clip_s == 30  # max nunca < min
+    assert (c.profile, c.text_mode, c.clips_per_video, c.min_clip_s, c.max_clip_s) == ("visual", "ranked", 5, 7, 7)
+    # clips/durações/modo de texto dos cortes (Configurações) não vazam para o compilado
+    leak = pipeline.compile_defaults(Config(theme="top 5", min_clip_s=30, max_clip_s=60, clips_per_video=9, text_mode="both"))
+    assert (leak.clips_per_video, leak.min_clip_s, leak.text_mode) == (5, 7, "ranked")
+    e = pipeline.compile_defaults(Config(theme="top 5", compile_clips=3, compile_pre_s=2, compile_post_s=5))
+    assert (e.clips_per_video, e.min_clip_s, e.max_clip_s) == (3, 7, 7)
+    # e o modo de texto continua `ranked` depois dos padrões por perfil
+    assert pipeline.effective_cfg(e, {}).text_mode == "ranked"
+
+
+def test_resolve_climax_cuts_around_the_peak_without_overlap():
+    cfg = Config(compile_pre_s=4, compile_post_s=3, clips_per_video=2)
+    base = {"title": "T", "hook_text": "h", "hook": 7, "start_id": 0, "end_id": 0}
+    cands = [{**base, "climax": 50.0, "score": 9}, {**base, "climax": 52.0, "score": 8},  # sobrepõe o primeiro
+             {**base, "climax": 2.0, "score": 7}, {**base, "climax": 99.0, "score": 6}]
+    ok, rej = V.resolve_climax(cands, cfg, total=100.0)
+    assert [(c["start"], c["end"]) for c in ok] == [(46.0, 53.0), (0.0, 5.0)]  # começo do vídeo: não passa de 0
+    assert [c["rank"] for c in ok] == [1, 2]
+    reasons = [r["reason_rejected"] for r in rej]
+    assert any("sobreposto" in r for r in reasons) and "acima da quantidade pedida" in reasons
+
+
+def test_climax_time_uses_the_model_timestamp_or_falls_back_to_the_middle():
+    shots = [{"id": 0, "start": 100.0, "end": 110.0}, {"id": 1, "start": 110.0, "end": 120.0}]
+    assert V.climax_time({"climax_ts": "00:13", "start_id": 0, "end_id": 1}, shots, shots) == 113.0
+    assert V.climax_time({"climax_ts": "", "start_id": 0, "end_id": 1}, shots, shots) == 110.0
+    assert V.climax_time({"climax_ts": "09:00", "start_id": 1, "end_id": 1}, shots, shots) == 115.0  # fora da janela
 
 
 def test_unique_videos_collapses_compilation_moments_into_one():
@@ -67,7 +88,7 @@ def test_review_warns_about_long_compilation_and_missing_moments(tmp_path):
 @needs_ffmpeg
 def test_compile_end_to_end_countdown_and_rebuild(tmp_path):
     video = make_cut_video(tmp_path / "lutas.mp4")  # 6 planos de 10 s
-    cfg = Config(theme="top 3 finalizações", compile_clips=3, judge=True, preset="ultrafast", proxy_height=144,
+    cfg = Config(theme="top 3 finalizações", compile_clips=3, compile_pre_s=5, compile_post_s=5, judge=True, preset="ultrafast", proxy_height=144,
                  source="https://www.youtube.com/watch?v=abc", license="CC-BY 4.0",
                  workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out")
     backend = SmartBackend(
@@ -95,6 +116,7 @@ def test_compile_end_to_end_countdown_and_rebuild(tmp_path):
     ws = next(p for p in cfg.workspace_dir.iterdir() if p.is_dir() and p.name != "downloads")
     first, last = (ws / "render" / "01" / "subs.ass").read_text(encoding="utf-8"), (ws / "render" / "03" / "subs.ass").read_text(encoding="utf-8")
     assert "#3" in first and "#1" in last and "TOP 3 FINALIZAÇÕES" in first and ",Rank," in first
+    assert "OS 3 MELHORES MOMENTOS" in first and ",About," in first
 
     text = review_path.read_text(encoding="utf-8")
     assert "Compilado:" in text and "contagem regressiva" in text and "Encaixe no tema" in text
@@ -121,7 +143,7 @@ def test_compile_end_to_end_countdown_and_rebuild(tmp_path):
 @needs_ffmpeg
 def test_compile_with_fewer_matches_than_requested_warns_and_nothing_matching_fails(tmp_path):
     video = make_cut_video(tmp_path / "lutas.mp4")
-    cfg = Config(theme="top 5 reviravoltas", compile_clips=5, judge=False, preset="ultrafast", proxy_height=144,
+    cfg = Config(theme="top 5 reviravoltas", compile_clips=5, compile_pre_s=5, compile_post_s=5, judge=False, preset="ultrafast", proxy_height=144,
                  workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out")
     backend = SmartBackend([tc(0, 0, "00:00", "00:10", fit=9, title="Um"), tc(2, 2, "00:20", "00:30", fit=8, title="Dois")])
     path = pipeline.run_compile(video, cfg, client_factory=factory(backend, cfg))

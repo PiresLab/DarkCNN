@@ -133,10 +133,14 @@ def finalize(kept: list[dict], dropped: list[dict], cfg: Config) -> tuple[list[d
 
 def select_final(cands: list[dict], units: list[dict], video: Path, vid: str, ws: Path, cfg: Config,
                  duration: float, judge_factory: Callable[[], GeminiClient], theme: str | None = None,
-                 force: bool = False, talk: bool = False) -> tuple[list[dict], list[dict]]:
-    """candidatos da 1ª passada -> tempos exatos -> (juiz) -> N finais + descartados."""
+                 force: bool = False, talk: bool = False, climax: bool = False) -> tuple[list[dict], list[dict]]:
+    """candidatos da 1ª passada -> tempos exatos -> (juiz) -> N finais + descartados.
+    `climax`: compilado, tempos em volta do clímax marcado pela IA (não pelos limites de plano)."""
     pool_cfg = cfg.model_copy(update={"clips_per_video": analyze.pool_size(cfg)})
-    clips, rejected = analyze.resolve(cands, units, pool_cfg, duration)
+    if climax:
+        clips, rejected = visual.resolve_climax(cands, pool_cfg, duration)
+    else:
+        clips, rejected = analyze.resolve(cands, units, pool_cfg, duration)
     if talk:
         for c in clips:
             c["transcript"] = " ".join(units[i]["text"] for i in range(c["start_id"], c["end_id"] + 1))
@@ -274,13 +278,11 @@ def render_from_selection(input_arg: str | Path, cfg: Config, ydl_cls: Any = Non
 
 # ------------------------------------------------------------------ compilado "Top N"
 def compile_defaults(cfg: Config) -> Config:
-    """O compilado usa os próprios campos (`compile_*`), nunca os dos cortes: perfil visual, texto `ranked`
-    (se não definido) e poucos trechos curtos."""
-    upd: dict = {"profile": "visual", "clips_per_video": cfg.compile_clips, "min_clip_s": cfg.compile_min_clip_s,
-                 "max_clip_s": max(cfg.compile_max_clip_s, cfg.compile_min_clip_s)}
-    if "text_mode" not in cfg.model_fields_set:
-        upd["text_mode"] = "ranked"
-    return cfg.model_copy(update=upd)
+    """O compilado usa os próprios campos (`compile_*`), nunca os dos cortes, e sempre o texto `ranked`
+    (o modo de texto de Configurações vale para os cortes). Cada clipe = antes + depois do clímax."""
+    span = cfg.compile_pre_s + cfg.compile_post_s
+    return cfg.model_copy(update={"profile": "visual", "text_mode": "ranked", "clips_per_video": cfg.compile_clips,
+                                  "min_clip_s": span, "max_clip_s": span})
 
 
 def prepare_theme(cands: list[dict], min_fit: int) -> tuple[list[dict], list[dict]]:
@@ -301,7 +303,7 @@ def assemble(video: Path, vid: str, ws: Path, out: Path, clips: list[dict], cfg:
     parts: list[Path] = []
     t = 0.0
     for i, c in enumerate(ordered, 1):
-        c.update(rank_pos=c["rank"], theme=cfg.theme, order=i)
+        c.update(rank_pos=c["rank"], theme=cfg.theme, order=i, total=len(ordered))
         seg = ws / "segments" / f"{i:02d}.mp4"
         log.info("trecho %d/%d: #%d %s (%.0fs)", i, len(ordered), c["rank"], c["title"], c["duration"])
         if not render.render_clip(video, c, [], cfg, seg, ws / "render" / f"{i:02d}", render.render_key(vid, c, [], cfg)):
@@ -337,8 +339,9 @@ def run_compile(input_arg: str | Path, cfg: Config, *, client_factory: Callable[
     _setup_logging(ws)
     info = media.video_info(video)
     log.info("compilado \"%s\": %s (%.1f min) -> id %s", cfg.theme, video.name, info["duration"] / 60, vid)
-    log.info("config: top %d, trechos de %.0f-%.0fs, layout=%s modelo=%s juiz=%s", cfg.clips_per_video,
-             cfg.min_clip_s, cfg.max_clip_s, cfg.layout, cfg.gemini_model, "sim" if cfg.judge else "não")
+    log.info("config: top %d, clipes de %gs antes + %gs depois do clímax, layout=%s modelo=%s juiz=%s",
+             cfg.clips_per_video, cfg.compile_pre_s, cfg.compile_post_s, cfg.layout, cfg.gemini_model,
+             "sim" if cfg.judge else "não")
     factory = client_factory or (lambda: make_client(cfg))
     jfactory = judge_factory or (client_factory or (lambda: make_client(cfg, cfg.judge_model)))
 
@@ -347,7 +350,7 @@ def run_compile(input_arg: str | Path, cfg: Config, *, client_factory: Callable[
     log.info("Gemini: %d chamada(s) novas, %d ID(s) corrigido(s)", vstats["api_calls"], vstats["reconciled"])
     cands, pre_rejected = prepare_theme(cands, cfg.theme_min_fit)
     clips, rejected = select_final(cands, units, video, vid, ws, cfg, info["duration"], jfactory,
-                                   theme=cfg.theme, force=force)
+                                   theme=cfg.theme, force=force, climax=True)
     rejected = pre_rejected + rejected
     if not clips:
         raise RuntimeError(f'nenhum momento combina com "{cfg.theme}" neste vídeo; veja rejected.json')
