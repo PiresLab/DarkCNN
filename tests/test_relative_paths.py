@@ -53,6 +53,6 @@ def test_compile_judge_with_relative_dirs(tmp_path, monkeypatch):
     video = make_cut_video(Path("lutas.mp4"))
     backend = SmartBackend([tc(0, 0, "00:00", "00:10", fit=9, title="Um"), tc(2, 2, "00:20", "00:30", fit=8, title="Dois")],
                            judge_plan={"A1": (60, True, ""), "A2": (90, True, "")})
-    cfg = rel_cfg(theme="top 2 lances", clips_per_video=2)
+    cfg = rel_cfg(theme="top 2 lances", compile_clips=2)
     review = pipeline.run_compile(video, cfg, client_factory=factory(backend))
     assert backend.judge_calls == 1 and (review.parent / "compilado_top-2-lances.mp4").exists()

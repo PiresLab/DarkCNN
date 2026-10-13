@@ -17,6 +17,7 @@ from .. import media
 from .. import storage
 from ..config import Config, load_config
 from ..db import Database
+from ..review import unique_videos
 from .jobs import JobManager
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,8 @@ def read_review(out_root: Path, folder: Path, extra: dict | None = None) -> dict
     narration = (folder / SCRIPTS).exists() and not (folder / SELECTION).exists()
     items = _load(folder / (SCRIPTS if narration else SELECTION))
     compilation = any(f.name.startswith("compilado") for f in folder.glob("compilado*.mp4"))
+    if compilation:
+        items = unique_videos(items)  # um compilado = um vídeo, não um por momento
     for i, it in enumerate(items, 1):
         it.setdefault("rank", i)
     return {

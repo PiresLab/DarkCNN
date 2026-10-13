@@ -29,4 +29,4 @@ REGRAS TÉCNICAS
 - `title`: título curto e chamativo para o post (até 60 caracteres).
 - `topic`: o assunto do roteiro em poucas palavras.
 
-Devolva {count} roteiro(s) diferentes entre si (temas diferentes, não variações do mesmo).
+Devolva {count} roteiro(s) diferentes entre si. Cada roteiro vira um vídeo INDEPENDENTE, postado separado: nada de "parte 2", "continuando", "como vimos" nem referência a outro roteiro, e não repita ideia, exemplo ou dado entre eles.

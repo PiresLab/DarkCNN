@@ -48,6 +48,7 @@ class Config(BaseModel):
     script_prompt_version: str = "script_v1"
     narrate_format: str = "curiosidade"  # curiosidade | voce-prefere | e-se | texto livre
     topic: str | None = None  # None = a IA escolhe o tema
+    topics: list[str] = []  # um assunto por vídeo (a IA propõe cada um); vazio = usa `topic`
     count: int = Field(1, ge=1, le=10)  # quantos vídeos por execução
     target_s: float = Field(45.0, gt=5)  # duração alvo da narração
     # TTS do Gemini: o ID do modelo e os nomes de voz mudam; `darkcnn voices --models` lista o que o projeto enxerga
@@ -82,6 +83,10 @@ class Config(BaseModel):
     min_clip_s: float = Field(30.0, gt=0)
     max_clip_s: float = Field(60.0, gt=0)
     clips_per_video: int = Field(5, ge=1)
+    # compilado "Top N": um único vídeo com poucos momentos curtos (independente dos cortes acima)
+    compile_clips: int = Field(5, ge=1, le=12)
+    compile_min_clip_s: float = Field(6.0, gt=0)
+    compile_max_clip_s: float = Field(12.0, gt=0)
     pad_start_s: float = 0.15
     pad_end_s: float = 0.30
     max_single_window_min: float = 40.0  # acima disso avisa (chunking só na Fase 3)

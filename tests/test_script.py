@@ -39,6 +39,15 @@ def test_prompt_with_explicit_topic_and_free_format():
     assert 'Formato "mitos desmentidos"' in p  # formato livre vira instrução genérica
 
 
+def test_prompt_asks_for_independent_distinct_topics_when_count_above_one():
+    p = S.build_prompt(Config(count=3, topics=["Buracos negros", "Oceano profundo", "Pirâmides"]))
+    assert '1. "Buracos negros"' in p and '3. "Pirâmides"' in p and "ângulos" not in p
+    assert "INDEPENDENTE" in p
+    q = S.build_prompt(Config(count=2, topic="espaço"))
+    assert "ASSUNTO GERAL" in q and "DIFERENTE" in q
+    assert "totalmente diferente" in S.build_prompt(Config(count=2))
+
+
 def test_estimated_duration_counts_words_and_pauses():
     cfg = Config(pause_s=0.5, countdown_s=3.0)
     s = S.Script(title="t", topic="t", lines=[

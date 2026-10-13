@@ -158,6 +158,19 @@ def test_auto_narrate_injects_the_proposed_topic_and_avoids_history():
     assert "Vulcões" in fake.prompts[0] and "espaço" in fake.prompts[0]
 
 
+def test_auto_narrate_with_count_proposes_one_distinct_topic_per_video():
+    seen = {}
+    fake = FakeClient(plan("Buracos negros"), plan("Oceano profundo"), plan("Pirâmides"))
+    spec = presets.PresetSpec(mode="narrate", count=3)
+    cfg = presets.build_config({}, spec, None, None)
+    runners = {"narrate": lambda src, c, force: seen.update(topics=c.topics, topic=c.topic) or Path("r.md")}
+    autopilot.run_auto("p", cfg, False, spec=spec, history=["Vulcões"], used_sources=set(),
+                       client_factory=lambda: fake, runners=runners)
+    assert seen["topics"] == ["Buracos negros", "Oceano profundo", "Pirâmides"] and seen["topic"] == "Buracos negros"
+    assert "Buracos negros" in fake.prompts[1] and "Vulcões" in fake.prompts[1]  # cada pedido vê os anteriores
+    assert "Oceano profundo" in fake.prompts[2]
+
+
 def test_auto_run_searches_filters_and_picks_a_video():
     entries = [
         {"id": "a1", "title": "Curto", "duration": 60, "channel": "X"},
@@ -257,11 +270,11 @@ def test_adhoc_run_carries_its_spec_in_the_job(tmp_path):
     assert seen == {"source": "adhoc", "fmt": "e-se"}
 
 
-def test_clips_field_sets_clips_per_video_for_cuts_and_compile_only():
+def test_clips_field_sets_clips_per_video_for_cuts_and_compile_clips_for_top():
     base = {"clips_per_video": 7}
     run = presets.build_config(base, presets.PresetSpec(mode="run", clips=3), None, None)
     top = presets.build_config(base, presets.PresetSpec(mode="compile", clips=4), None, None)
-    assert run.clips_per_video == 3 and top.clips_per_video == 4
+    assert run.clips_per_video == 3 and top.compile_clips == 4 and top.clips_per_video == 7
     # sem valor no preset vale o de Configurações; narração nunca mexe nos cortes
     assert presets.build_config(base, presets.PresetSpec(mode="run"), None, None).clips_per_video == 7
     nar = presets.build_config(base, presets.PresetSpec(mode="narrate", count=2, clips=9), None, None)

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import Config
+from ..review import unique_videos
 from . import captions
 from .post import PostOptions
 
@@ -47,7 +48,7 @@ def enqueue_posts(store: Any, cfg: Config, spec: Any, review: str, preset_id: st
         return []
     folder = Path(review).parent
     kind, items = read_items(folder)
-    items = [i for i in items if i.get("file") and (folder / str(i["file"])).is_file()]
+    items = [i for i in unique_videos(items) if i.get("file") and (folder / str(i["file"])).is_file()]
     if not items:
         log.warning("automação sem vídeos para postar em %s", folder)
         return []

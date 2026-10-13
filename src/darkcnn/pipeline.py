@@ -273,18 +273,13 @@ def render_from_selection(input_arg: str | Path, cfg: Config, ydl_cls: Any = Non
 
 
 # ------------------------------------------------------------------ compilado "Top N"
-COMPILE_MIN_S, COMPILE_MAX_S = 8.0, 25.0  # trechos curtos: o compilado soma vários
-
-
 def compile_defaults(cfg: Config) -> Config:
-    """Padrões do compilado quando o usuário não definiu: perfil visual, texto `ranked`, trechos de 8-25 s."""
-    upd: dict = {"profile": "visual"}
+    """O compilado usa os próprios campos (`compile_*`), nunca os dos cortes: perfil visual, texto `ranked`
+    (se não definido) e poucos trechos curtos."""
+    upd: dict = {"profile": "visual", "clips_per_video": cfg.compile_clips, "min_clip_s": cfg.compile_min_clip_s,
+                 "max_clip_s": max(cfg.compile_max_clip_s, cfg.compile_min_clip_s)}
     if "text_mode" not in cfg.model_fields_set:
         upd["text_mode"] = "ranked"
-    if "min_clip_s" not in cfg.model_fields_set:
-        upd["min_clip_s"] = COMPILE_MIN_S
-    if "max_clip_s" not in cfg.model_fields_set:
-        upd["max_clip_s"] = max(COMPILE_MAX_S, cfg.min_clip_s) if "min_clip_s" in cfg.model_fields_set else COMPILE_MAX_S
     return cfg.model_copy(update=upd)
 
 

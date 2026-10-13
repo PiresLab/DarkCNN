@@ -33,12 +33,13 @@ const SECTIONS: { title: string; desc: string; fields: Def[]; advanced?: boolean
     { key: "tts_speed", label: "Velocidade da voz", type: "slider", min: 0.8, max: 1.5, step: 0.05, fmt: (v) => `${v.toFixed(2)}x`, hint: "1.1 a 1.2 deixa o ritmo mais de vídeo curto." },
     { key: "game_volume", label: "Volume do som do background", type: "slider", min: 0, max: 1, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%`, hint: "Zero deixa só a voz. O som do jogo pode gerar reclamação de direitos." },
   ] },
-  { title: "Cortes e compilados", desc: "Duração e quantidade dos cortes.", fields: [
-    { key: "clips_per_video", label: "Cortes por vídeo", type: "number", min: 1, max: 12 },
-    { key: "min_clip_s", label: "Duração mínima (s)", type: "number", min: 5, max: 180 },
-    { key: "max_clip_s", label: "Duração máxima (s)", type: "number", min: 10, max: 180 },
-  ] },
   { title: "Avançado", desc: "Só mexa se souber o que está fazendo.", advanced: true, fields: [
+    { key: "compile_clips", label: "Compilado: momentos no vídeo", type: "number", min: 1, max: 12, hint: "O compilado é sempre um único vídeo. Padrão: 5." },
+    { key: "compile_min_clip_s", label: "Compilado: duração mínima de cada momento (s)", type: "number", min: 3, max: 60, hint: "Poucos segundos antes e depois do clímax. Padrão: 6." },
+    { key: "compile_max_clip_s", label: "Compilado: duração máxima de cada momento (s)", type: "number", min: 4, max: 90, hint: "Padrão: 12." },
+    { key: "clips_per_video", label: "Cortes por vídeo", type: "number", min: 1, max: 12 },
+    { key: "min_clip_s", label: "Cortes: duração mínima (s)", type: "number", min: 5, max: 180 },
+    { key: "max_clip_s", label: "Cortes: duração máxima (s)", type: "number", min: 10, max: 180 },
     { key: "thinking_level", label: "Nível de raciocínio", type: "select", options: [["off", "Desligado"], ["low", "Baixo"], ["medium", "Médio"], ["high", "Alto"]] },
     { key: "crf", label: "Qualidade do vídeo (CRF)", type: "number", min: 14, max: 32, hint: "Menor = melhor qualidade e arquivo maior." },
     { key: "preset", label: "Velocidade de codificação", type: "select", options: [["ultrafast", "Muito rápida"], ["veryfast", "Rápida"], ["medium", "Normal"], ["slow", "Lenta (menor arquivo)"]] },

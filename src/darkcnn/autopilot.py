@@ -135,7 +135,14 @@ def run_auto(preset_id: str, cfg: Config, force: bool, *, spec: PresetSpec, hist
     source = ""
     if spec.mode == "narrate":
         if plan:
-            cfg = cfg.model_copy(update={"topic": plan.topic})
+            topics = [plan.topic]
+            for _ in range(cfg.count - 1):  # um assunto distinto por vídeo, sem repetir os já propostos
+                nxt = propose_topic(make(), spec, [*topics, *history])
+                log.info("tema: %s — %s", nxt.topic, nxt.angle)
+                topics.append(nxt.topic)
+            cfg = cfg.model_copy(update={"topic": plan.topic, "topics": topics})
+            if len(topics) > 1:
+                runctx.record_params(topic=" | ".join(topics))
     else:
         if spec.auto_source:
             assert plan is not None

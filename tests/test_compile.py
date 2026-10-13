@@ -29,12 +29,23 @@ def test_prepare_theme_drops_weak_fits_and_weights_fit():
     assert cands[0]["score"] == 6  # não altera a entrada
 
 
-def test_compile_defaults_respect_explicit_choices():
+def test_compile_defaults_use_compile_fields_not_the_cuts_ones():
     c = pipeline.compile_defaults(Config(theme="top 5"))
-    assert (c.profile, c.text_mode, c.min_clip_s, c.max_clip_s) == ("visual", "ranked", 8, 25)
-    e = pipeline.compile_defaults(Config(theme="top 5", min_clip_s=12, max_clip_s=40, text_mode="none"))
-    assert (e.min_clip_s, e.max_clip_s, e.text_mode) == (12, 40, "none")
-    assert pipeline.compile_defaults(Config(theme="x", min_clip_s=30)).max_clip_s == 30  # max nunca < min
+    assert (c.profile, c.text_mode, c.clips_per_video, c.min_clip_s, c.max_clip_s) == ("visual", "ranked", 5, 6, 12)
+    # min/max/clips dos cortes (Configurações) não vazam para o compilado
+    leak = pipeline.compile_defaults(Config(theme="top 5", min_clip_s=30, max_clip_s=60, clips_per_video=9, text_mode="none"))
+    assert (leak.clips_per_video, leak.min_clip_s, leak.max_clip_s, leak.text_mode) == (5, 6, 12, "none")
+    e = pipeline.compile_defaults(Config(theme="top 5", compile_clips=3, compile_min_clip_s=8, compile_max_clip_s=20))
+    assert (e.clips_per_video, e.min_clip_s, e.max_clip_s) == (3, 8, 20)
+    assert pipeline.compile_defaults(Config(theme="x", compile_min_clip_s=30)).max_clip_s == 30  # max nunca < min
+
+
+def test_unique_videos_collapses_compilation_moments_into_one():
+    items = [{"rank": r, "file": "c.mp4", "title": f"M{r}", "theme": "top 3"} for r in (3, 1, 2)]
+    out = review.unique_videos(items)
+    assert len(out) == 1 and out[0]["rank"] == 1 and out[0]["title"] == "top 3"
+    cuts = [{"rank": 1, "file": "a.mp4", "title": "A", "theme": None}, {"rank": 2, "file": "b.mp4", "title": "B"}]
+    assert review.unique_videos(cuts) == cuts  # cortes: um vídeo por item, nada muda
 
 
 def test_compile_requires_a_theme(tmp_path):
@@ -56,7 +67,7 @@ def test_review_warns_about_long_compilation_and_missing_moments(tmp_path):
 @needs_ffmpeg
 def test_compile_end_to_end_countdown_and_rebuild(tmp_path):
     video = make_cut_video(tmp_path / "lutas.mp4")  # 6 planos de 10 s
-    cfg = Config(theme="top 3 finalizações", clips_per_video=3, judge=True, preset="ultrafast", proxy_height=144,
+    cfg = Config(theme="top 3 finalizações", compile_clips=3, judge=True, preset="ultrafast", proxy_height=144,
                  source="https://www.youtube.com/watch?v=abc", license="CC-BY 4.0",
                  workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out")
     backend = SmartBackend(
@@ -110,7 +121,7 @@ def test_compile_end_to_end_countdown_and_rebuild(tmp_path):
 @needs_ffmpeg
 def test_compile_with_fewer_matches_than_requested_warns_and_nothing_matching_fails(tmp_path):
     video = make_cut_video(tmp_path / "lutas.mp4")
-    cfg = Config(theme="top 5 reviravoltas", clips_per_video=5, judge=False, preset="ultrafast", proxy_height=144,
+    cfg = Config(theme="top 5 reviravoltas", compile_clips=5, judge=False, preset="ultrafast", proxy_height=144,
                  workspace_dir=tmp_path / "ws", output_dir=tmp_path / "out")
     backend = SmartBackend([tc(0, 0, "00:00", "00:10", fit=9, title="Um"), tc(2, 2, "00:20", "00:30", fit=8, title="Dois")])
     path = pipeline.run_compile(video, cfg, client_factory=factory(backend, cfg))

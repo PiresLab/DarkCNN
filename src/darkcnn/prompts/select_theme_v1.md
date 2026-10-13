@@ -20,7 +20,7 @@ REGRAS DO TEMA
 
 REGRAS TÉCNICAS
 - Um momento é um intervalo CONTÍGUO de planos, de `start_id` até `end_id` (inclusive). O corte vai do início do plano `start_id` ao fim do plano `end_id`.
-- Duração entre {min_s} e {max_s} segundos, somando as durações dos planos da lista. Comece um pouco antes da ação e termine logo depois do clímax e da reação. Nunca corte o lance pela metade.
+- Duração entre {min_s} e {max_s} segundos, somando as durações dos planos da lista. Cada momento é UM lance coeso e curto: comece 2 a 4 segundos antes do clímax (só o necessário para entender a jogada) e termine 2 a 4 segundos depois dele (a reação). Não inclua preparação longa nem replays. Nunca corte o lance pela metade.
 - Use SOMENTE ids que existem na lista. Os momentos não podem se sobrepor.
 - `start_ts` e `end_ts`: tempo MM:SS, relativo ao início deste vídeo anexo, em que o momento começa e termina. Servem para conferir os ids; seja o mais exato que puder.
 - Não cite nomes de lutadores, eventos ou pessoas a menos que apareçam escritos na tela ou sejam falados com clareza. Na dúvida, descreva a ação sem nomes.

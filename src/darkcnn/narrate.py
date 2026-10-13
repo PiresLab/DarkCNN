@@ -85,7 +85,7 @@ def pick_playable(files: list[Path], needed_s: float, rng: random.Random,
 # ---------------------------------------------------------------- etapas
 def run_id(cfg: Config) -> str:
     """Mesmo comando = mesma pasta (o cache vale entre execuções)."""
-    h = cache.key_of(fmt=cfg.narrate_format, topic=cfg.topic, count=cfg.count, target=cfg.target_s,
+    h = cache.key_of(fmt=cfg.narrate_format, topic=cfg.topic, topics=cfg.topics, count=cfg.count, target=cfg.target_s,
                      model=cfg.gemini_model, prompt=cfg.script_prompt_version, thinking=cfg.thinking_level)
     return f"{media.slugify(cfg.narrate_format, 24)}-{h[:8]}"
 

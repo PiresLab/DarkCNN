@@ -36,6 +36,26 @@ def license_warnings(lic: str | None) -> list[str]:
     return out
 
 
+def unique_videos(items: list[dict]) -> list[dict]:
+    """Itens com o mesmo `file` são momentos de UM vídeo (compilado): devolve um item por arquivo, o de melhor
+    rank, com o tema como título. Itens sem `file` ficam como estão."""
+    out: list[dict] = []
+    seen: dict[str, int] = {}
+    shared: set[str] = set()
+    for it in items:
+        f = it.get("file")
+        if not f:
+            out.append(it)
+        elif f not in seen:
+            seen[f] = len(out)
+            out.append(it)
+        else:
+            shared.add(f)
+            if (it.get("rank") or 99) < (out[seen[f]].get("rank") or 99):
+                out[seen[f]] = it
+    return [{**it, "title": it["theme"]} if it.get("file") in shared and it.get("theme") else it for it in out]
+
+
 def write_review(out_dir: Path, video: Path, cfg: Config, clips: list[dict], rejected: list[dict],
                  info: dict, meta: dict | None = None, compilation: dict | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)

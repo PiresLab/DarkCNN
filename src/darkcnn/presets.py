@@ -95,8 +95,11 @@ def build_config(base: dict, spec: PresetSpec, gameplay_dir: Path | None, db: Da
     data: dict[str, Any] = dict(base)
     data.update({"narrate_format": spec.narrate_format, "count": spec.count, "target_s": spec.target_s,
                  "profile": spec.profile})
-    if spec.mode in ("run", "compile") and spec.clips:
-        data["clips_per_video"] = spec.clips
+    if spec.clips:
+        if spec.mode == "run":
+            data["clips_per_video"] = spec.clips
+        elif spec.mode == "compile":
+            data["compile_clips"] = spec.clips
     if spec.tts_voice:
         data["tts_voice"] = spec.tts_voice
     if spec.tts_voices_pool:

@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { Gamepad2 } from "lucide-react";
 import clsx from "clsx";
-import { ChoiceCard, Field, Segmented, Toggle } from "./ui";
+import { ChoiceCard, Collapsible, Field, Segmented, Toggle } from "./ui";
 import { FORMATS, MODES } from "../lib/labels";
 import { useConfig, useGameplays, useTikTok, useVoices } from "../lib/hooks";
 import { defaultTikTok, type Mode, type PresetSpec, type TikTokSpec } from "../lib/types";
@@ -10,7 +10,7 @@ type Set = (patch: Partial<PresetSpec>) => void;
 
 /** Quantos vídeos/cortes uma execução entrega (narração: `count`; cortes e compilado: `clips`). */
 export const outputs = (spec: PresetSpec, defaultClips: number) =>
-  spec.mode === "narrate" ? spec.count : (spec.clips ?? defaultClips);
+  spec.mode === "narrate" ? spec.count : spec.mode === "compile" ? 1 : (spec.clips ?? defaultClips);
 
 /** Passo 1: tipo de vídeo. */
 export function ModeStep({ spec, set }: { spec: PresetSpec; set: Set }) {
@@ -26,7 +26,9 @@ export function ModeStep({ spec, set }: { spec: PresetSpec; set: Set }) {
 /** Passo 2: conteúdo. */
 export function ContentStep({ spec, set }: { spec: PresetSpec; set: Set }) {
   const narrate = spec.mode === "narrate";
-  const defaultClips = useConfig().data?.effective.clips_per_video ?? 5;
+  const cfg = useConfig().data?.effective;
+  const defaultClips = cfg?.clips_per_video ?? 5;
+  const defaultCompileClips = cfg?.compile_clips ?? 5;
   return (
     <div className="space-y-5">
       {narrate && (
@@ -41,7 +43,7 @@ export function ContentStep({ spec, set }: { spec: PresetSpec; set: Set }) {
 
       <div className="card space-y-4 p-4">
         <Toggle checked={spec.auto_topic} onChange={(v) => set({ auto_topic: v })}
-          label="Deixar a IA escolher o tema" hint="A cada vídeo a IA propõe um assunto novo, sem repetir os anteriores." />
+          label="Deixar a IA escolher o tema" hint="Cada vídeo recebe um assunto novo, sem repetir os anteriores." />
         {spec.auto_topic ? (
           <Field label="Nicho do canal (opcional)" hint="Ajuda a IA a ficar no seu assunto. Ex.: ciência e espaço, futebol, dinheiro.">
             <input className="input" value={spec.niche ?? ""} onChange={(e) => set({ niche: e.target.value || null })} placeholder="Qualquer assunto popular" />
@@ -75,24 +77,34 @@ export function ContentStep({ spec, set }: { spec: PresetSpec; set: Set }) {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {narrate ? (
-          <Field label="Quantos vídeos">
-            <input type="number" min={1} max={10} className="input" value={spec.count} onChange={(e) => set({ count: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
-          </Field>
-        ) : (
-          <Field label={spec.mode === "compile" ? "Momentos no top" : "Quantos cortes"}
-            hint={spec.clips ? undefined : "Vazio: usa o valor de Configurações."}>
-            <input type="number" min={1} max={12} className="input" value={spec.clips ?? ""} placeholder={String(defaultClips)}
+      {spec.mode !== "compile" && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {narrate ? (
+            <Field label="Quantos vídeos" hint={spec.count > 1 ? "Cada vídeo recebe um assunto diferente." : undefined}>
+              <input type="number" min={1} max={10} className="input" value={spec.count} onChange={(e) => set({ count: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
+            </Field>
+          ) : (
+            <Field label="Quantos cortes" hint={spec.clips ? undefined : "Vazio: usa o valor de Configurações."}>
+              <input type="number" min={1} max={12} className="input" value={spec.clips ?? ""} placeholder={String(defaultClips)}
+                onChange={(e) => set({ clips: e.target.value === "" ? null : Math.max(1, Math.min(12, Number(e.target.value) || 1)) })} />
+            </Field>
+          )}
+          {narrate && (
+            <Field label="Duração aproximada" hint={`${spec.target_s} segundos`}>
+              <input type="range" min={20} max={120} step={5} className="w-full accent-[rgb(var(--brand))]" value={spec.target_s} onChange={(e) => set({ target_s: Number(e.target.value) })} />
+            </Field>
+          )}
+        </div>
+      )}
+
+      {spec.mode === "compile" && (
+        <Collapsible title="Avançado">
+          <Field label="Momentos no top" hint={spec.clips ? "Um único vídeo com esses momentos, cada um com poucos segundos." : `Vazio: ${defaultCompileClips} momentos num único vídeo.`}>
+            <input type="number" min={1} max={12} className="input" value={spec.clips ?? ""} placeholder={String(defaultCompileClips)}
               onChange={(e) => set({ clips: e.target.value === "" ? null : Math.max(1, Math.min(12, Number(e.target.value) || 1)) })} />
           </Field>
-        )}
-        {narrate && (
-          <Field label="Duração aproximada" hint={`${spec.target_s} segundos`}>
-            <input type="range" min={20} max={120} step={5} className="w-full accent-[rgb(var(--brand))]" value={spec.target_s} onChange={(e) => set({ target_s: Number(e.target.value) })} />
-          </Field>
-        )}
-      </div>
+        </Collapsible>
+      )}
     </div>
   );
 }

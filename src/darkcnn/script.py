@@ -69,13 +69,20 @@ def format_block(fmt: str) -> str:
 
 def build_prompt(cfg: Config) -> str:
     tpl = (PROMPTS_DIR / f"{cfg.script_prompt_version}.md").read_text(encoding="utf-8")
-    topic = (
-        f'TEMA OBRIGATÓRIO: "{cfg.topic}". Todos os roteiros são sobre isso (ângulos diferentes).'
-        if cfg.topic else
-        "TEMA: escolha você mesmo um assunto com apelo popular e que renda imagem mental forte "
-        "(espaço, corpo humano, oceano profundo, animais, história, dinheiro, tecnologia, mistérios). "
-        "Evite assunto datado, que envelhece rápido, e evite polêmica política ou religiosa."
-    )
+    if len(cfg.topics) > 1:
+        listing = "\n".join(f'{i}. "{t}"' for i, t in enumerate(cfg.topics[: cfg.count], 1))
+        topic = ("TEMAS OBRIGATÓRIOS: um roteiro para cada tema, na ordem, e cada roteiro trata SÓ do seu tema. "
+                 f"São vídeos separados, sem relação entre si:\n{listing}")
+    elif cfg.topic and cfg.count > 1:
+        topic = (f'ASSUNTO GERAL: "{cfg.topic}". Cada roteiro escolhe um aspecto, fato ou história DIFERENTE '
+                 "dentro desse assunto, sem repetir ideia, exemplo ou dado entre eles.")
+    elif cfg.topic:
+        topic = f'TEMA OBRIGATÓRIO: "{cfg.topic}".'
+    else:
+        topic = ("TEMA: escolha você mesmo um assunto com apelo popular e que renda imagem mental forte "
+                 "(espaço, corpo humano, oceano profundo, animais, história, dinheiro, tecnologia, mistérios). "
+                 "Evite assunto datado, que envelhece rápido, e evite polêmica política ou religiosa."
+                 + (" Cada roteiro tem um assunto totalmente diferente dos outros." if cfg.count > 1 else ""))
     return tpl.format(
         count=cfg.count, format_name=cfg.narrate_format, format_block=format_block(cfg.narrate_format),
         topic_block=topic, target_s=cfg.target_s, target_words=int(cfg.target_s * WORDS_PER_SECOND),
